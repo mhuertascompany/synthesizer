@@ -5,7 +5,7 @@ from synthesizer.load_data.load_illustris import load_IllustrisTNG
 from synthesizer.grid import Grid
 from synthesizer.imaging import Image
 from synthesizer.instruments.filters import FilterCollection
-from synthesizer.emission_models.models import AttenuatedEmission, ReprocessedEmission
+from synthesizer.emission_models import AttenuatedEmission, ReprocessedEmission
 from synthesizer.emission_models.attenuation import Calzetti2000
 from synthesizer.kernel_functions import Kernel
 from scipy.ndimage import gaussian_filter
@@ -14,10 +14,11 @@ from astropy.cosmology import Planck15 as cosmo
 import astropy.units as u
 
 # Define paths - USER MUST VERIFY THESE
-TNG_PATH = "/path/to/tng/data"  # e.g., /virgotng/universe/IllustrisTNG/TNG50-1/output
-GRID_DIR = "/path/to/grids"     # e.g., /home/user/synthesizer_data/grids
+TNG_PATH = "/virgotng/universe/IllustrisTNG/TNG50-1/output"  # e.g., /virgotng/universe/IllustrisTNG/TNG50-1/output
+GRID_DIR = "/u/mhuertas/data/synthesizer"     # e.g., /home/user/synthesizer_data/grids
 # Standard grid with nebular emission (required for ReprocessedEmission)
 GRID_NAME = "bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps"
+OUTPUT_PATH="/u/mhuertas/data/euclid/tngmocks"
 
 def generate_euclid_vis_image():
     print("Loading TNG data...")
@@ -214,7 +215,7 @@ def generate_euclid_vis_image():
     hdu.header['UNITS'] = 'erg/s/cm^2'
     hdu.header['FOV_KPC'] = fov_kpc
     
-    hdu.writeto('euclid_vis_galaxy.fits', overwrite=True)
+    hdu.writeto(os.path.join(OUTPUT_PATH, 'euclid_vis_galaxy.fits'), overwrite=True)
     print("Done! Saved to euclid_vis_galaxy.fits")
 
 if __name__ == "__main__":

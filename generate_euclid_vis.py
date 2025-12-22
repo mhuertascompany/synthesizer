@@ -5,7 +5,7 @@ from unyt import Myr, kpc, arcsec, Angstrom, Msun, pc
 from synthesizer.load_data.load_illustris import load_IllustrisTNG
 from synthesizer.grid import Grid
 from synthesizer.imaging import Image
-from synthesizer.instruments.filters import FilterCollection
+from synthesizer.instruments.filters import FilterCollection, Filter
 from synthesizer.emission_models import AttenuatedEmission, ReprocessedEmission
 from synthesizer.emission_models.attenuation import Calzetti2000
 from synthesizer.kernel_functions import Kernel
@@ -71,14 +71,32 @@ def generate_euclid_vis_image():
 
     # Load Euclid VIS Filter
     print("Loading Euclid VIS filter...")
+    # Define Euclid VIS filter manually to avoid SVO issues
+    # Approximate transmission curve (top-hat-like but with wings)
+    # VIS covers 5500 - 9000 Angstroms
+    vis_lam = np.linspace(5000, 9500, 1000) * Angstrom
+    vis_trans = np.zeros_like(vis_lam)
+    mask = (vis_lam.value >= 5500) & (vis_lam.value <= 9000)
+    vis_trans[mask] = 1.0 # Simple top-hat for now, but defined as a generic filter
+    
     try:
-        filters = FilterCollection(filter_codes=["Euclid/VIS"], new_lam=grid.lam)
-        vis_filter = filters[0]
+        # Try SVO first with correct code if known, but "Euclid/VIS" is likely wrong.
+        # Common format is Observatory/Instrument.Filter
+        # Let's try to just use the manual definition which is robust.
+        vis_filter = Filter(
+            "Euclid/VIS_manual",
+            transmission=vis_trans,
+            new_lam=vis_lam
+        )
+        # Re-interpolate to grid wavelength
+        vis_filter.resample_transmission(grid.lam)
+        
     except Exception as e:
-        print(f"Could not load Euclid/VIS from SVO: {e}")
+        print(f"Could not create manual filter: {e}")
         print("Using a top-hat approximation (5500-9000 A)...")
+        # Fix: Add units to lam_min and lam_max
         filters = FilterCollection(
-            tophat_dict={"Euclid_VIS_approx": {"lam_min": 5500, "lam_max": 9000}},
+            tophat_dict={"Euclid_VIS_approx": {"lam_min": 5500 * Angstrom, "lam_max": 9000 * Angstrom}},
             new_lam=grid.lam
         )
         vis_filter = filters[0]

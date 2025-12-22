@@ -48,6 +48,7 @@ def load_IllustrisTNG(
     directory=".",
     snap_number=99,
     stellar_mass_limit=8.5e6,
+    subhalo_ids=None,
     verbose=True,
     dtm=0.3,
     physical=True,
@@ -70,6 +71,9 @@ def load_IllustrisTNG(
         stellar_mass_limit (float):
             Stellar mass limit above which to load galaxies.
             In units of solar mass.
+        subhalo_ids (int or list):
+            Specific subhalo IDs to load. If provided, stellar_mass_limit
+            is ignored.
         verbose (bool):
             Verbosity flag
         dtm (float):
@@ -115,7 +119,12 @@ def load_IllustrisTNG(
 
     # Perform stellar mass masking
     stellar_mass = output["SubhaloMassType"][:, 4]
-    subhalo_mask = (stellar_mass * 1e10) > stellar_mass_limit
+    
+    if subhalo_ids is not None:
+        subhalo_mask = np.zeros(len(stellar_mass), dtype=bool)
+        subhalo_mask[subhalo_ids] = True
+    else:
+        subhalo_mask = (stellar_mass * 1e10) > stellar_mass_limit
 
     subhalo_pos = output["SubhaloPos"][subhalo_mask]
 

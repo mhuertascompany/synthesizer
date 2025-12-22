@@ -260,10 +260,11 @@ def generate_euclid_vis_image():
         print("get_stellar_los_tau_v calculation complete.", flush=True)
         
         # Calculate Particle Spectra for Optimized Stars
-        print("Calculating particle spectra...", flush=True)
+        print("Calculating particle spectra (parallelized)...", flush=True)
         spectra_dict = target_galaxy.stars.get_particle_spectra(
             model, 
-            tau_v=tau_v_opt
+            tau_v=tau_v_opt,
+            nthreads=-1
         )
         
         # Restore original galaxy components
@@ -274,18 +275,31 @@ def generate_euclid_vis_image():
         if spec_key not in spectra_dict:
             spec_key = list(spectra_dict.keys())[0]
         
-        particle_spectra = spectra_dict[spec_key] # (n_sampled_stars, n_lam)
+        particle_spectra = spectra_dict[spec_key] # This is an Sed object
 
         # Calculate Photometry (Flux)
-        print("Calculating photometry...", flush=True)
-        lam = grid.lam # Angstrom
-        trans_effective = np.interp(lam * (1 + z_obs), vis_filter.lam, vis_filter.transmission, left=0, right=0)
+        print("Calculating photometry (parallelized)...", flush=True)
+        # 1. Calculate fnu (observed frame)
+        particle_spectra.get_fnu(cosmo, z_obs)
         
-        # Integrate L_rest * T_effective
-        luminosity_in_band = np.trapz(particle_spectra * trans_effective, x=lam, axis=1)
+        # 2. Calculate integrated flux efficiently
+        # We want \int F_nu T_nu dnu
+        # Interpolate transmission onto the observed wavelength grid
+        t_lam = np.interp(
+            particle_spectra.obslam.to(Angstrom).value, 
+            vis_filter.lam.to(Angstrom).value, 
+            vis_filter.transmission, 
+            left=0, right=0
+        )
         
-        # Convert to Flux (erg/s/cm^2)
-        flux_in_band = luminosity_in_band / (4 * np.pi * d_lum**2)
+        # Integrate F_nu * T_nu over nu
+        # Note: obsnu is descending, so we take the absolute value of trapz
+        # We ensure units are consistent for the integration
+        flux_in_band = np.abs(np.trapz(
+            (particle_spectra.fnu * t_lam).to('erg/s/cm**2/Hz').value, 
+            x=particle_spectra.obsnu.to('Hz').value, 
+            axis=-1
+        ))
         
         # SCALE FLUX to account for downsampling
         flux_in_band *= star_weight_scale

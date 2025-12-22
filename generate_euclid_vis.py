@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-from unyt import Myr, kpc, arcsec, Angstrom, Msun, pc
+from unyt import Myr, kpc, arcsec, Angstrom, Msun, pc, km, s
 from synthesizer.load_data.load_illustris import load_IllustrisTNG
 from synthesizer.grid import Grid
 from synthesizer.imaging import Image
@@ -10,6 +10,7 @@ from synthesizer.emission_models import AttenuatedEmission, ReprocessedEmission
 from synthesizer.emission_models.attenuation import Calzetti2000
 from synthesizer.kernel_functions import Kernel
 from synthesizer.particle.gas import Gas
+from synthesizer.particle.stars import Stars
 from scipy.ndimage import gaussian_filter
 from astropy.io import fits
 from astropy.cosmology import Planck15 as cosmo
@@ -21,6 +22,9 @@ GRID_DIR = "/u/mhuertas/data/synthesizer"     # e.g., /home/user/synthesizer_dat
 # Standard grid with nebular emission (required for ReprocessedEmission)
 GRID_NAME = "bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps"
 OUTPUT_PATH="/u/mhuertas/data/euclid/tngmocks"
+
+# Optimization Parameters
+PARTICLE_LIMIT = 1000000 # Max particles to process for tau_v and spectra
 
 def generate_euclid_vis_image():
     print("Loading TNG data...", flush=True)
@@ -59,8 +63,8 @@ def generate_euclid_vis_image():
     # Calculate Distances
     d_lum = cosmo.luminosity_distance(z_obs).to(u.cm).value # Luminosity distance in cm
     d_ang = cosmo.angular_diameter_distance(z_obs).to(u.kpc).value # Angular diameter distance in kpc
-    scale_kpc_per_arcsec = d_ang * np.pi / 180 / 3600 * 1000 # kpc per arcsec (approx)
-    # Actually astropy has kpc_proper_per_arcmin
+    
+    # Scale: kpc per arcsec
     scale_kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_obs).value / 60.0
     
     print(f"Observation Redshift: {z_obs}", flush=True)
@@ -75,14 +79,11 @@ def generate_euclid_vis_image():
     vis_filter = None
     
     # 1. Try Local ASCII File (User provided)
-    # Check GRID_DIR as requested
     local_filter_path = os.path.join(GRID_DIR, 'Euclid_VIS.vis.dat')
     if os.path.exists(local_filter_path):
         print(f"Found local filter at {local_filter_path}. Loading...", flush=True)
         try:
-            # Assuming 2 columns: Wavelength (Angstrom), Transmission
             data = np.loadtxt(local_filter_path)
-            # SVO usually provides Angstroms. Check if valid.
             lam_local = data[:, 0] * Angstrom
             trans_local = data[:, 1]
             
@@ -147,7 +148,8 @@ def generate_euclid_vis_image():
     # FOV Definition
     fov_kpc = 100.0
     fov_arcsec = fov_kpc / scale_kpc_per_arcsec
-    resolution = int(fov_arcsec / pixel_scale_arcsec) if 'pixel_scale_arcsec' in locals() else 1000 # Default if not set yet
+    pixel_scale_arcsec = 0.1 # Euclid VIS
+    resolution = int(fov_arcsec / pixel_scale_arcsec)
     
     # Calculate Physical Optical Depth (tau_v)
     if target_galaxy.gas is not None:
@@ -155,161 +157,158 @@ def generate_euclid_vis_image():
         
         # 1. Get Kernel
         print("Generating kernel...", flush=True)
-        # We use a cubic spline kernel, standard in SPH
-        # Reduce binsize to 1000 for speed (default 10000)
         kernel_obj = Kernel(name="cubic", binsize=1000)
         kernel = kernel_obj.get_kernel()
         print("Kernel generated.", flush=True)
         
         # 2. Define Kappa (Dust Opacity)
-        # Kappa = dust_to_gas_ratio * mass_extinction_coefficient
-        # Synthesizer expects kappa in units of Msun / pc^2 (inverse surface density).
-        # We use a value of 20 pc^2 / Msun which is typical for these simulations.
         kappa = 20.0 
         
         # 3. Calculate tau_v
-        # We need to ensure gas has 'dust_masses'. 
-        # If not, we calculate them from metallicity.
         if not hasattr(target_galaxy.gas, 'dust_masses'):
             print("Calculating dust masses from metallicity (D/M = 0.4 * Z)...", flush=True)
-            # Simple assumption: Dust-to-Metal ratio = 0.4 (approx MW)
             dust_to_metal = 0.4
             target_galaxy.gas.dust_masses = target_galaxy.gas.masses * target_galaxy.gas.metallicities * dust_to_metal
             print("Dust masses calculated.", flush=True)
 
-        # OPTIMIZATION: Filter particles to FOV to speed up calculation
-        print("Optimizing: Filtering particles to FOV...", flush=True)
+        # OPTIMIZATION: Filter particles to FOV and DOWNSAMPLE
+        print("Optimizing: Filtering and Downsampling particles...", flush=True)
         
-        # Define FOV limits (with buffer for gas smoothing)
-        # FOV is 100 kpc. Let's add 50 kpc buffer for gas.
+        # FOV limits
         fov_limit = fov_kpc / 2 * kpc
         gas_buffer = 50 * kpc
         
-        # Star Mask (Strictly within FOV for image, but we can be slightly generous)
-        # Actually, for the image we only need stars in the FOV.
-        # But for tau_v, we need to calculate it for those stars.
+        # --- STAR FILTERING ---
         star_coords = target_galaxy.stars.coordinates
         if target_galaxy.stars.centre is not None:
             star_coords -= target_galaxy.stars.centre
             
-        star_mask = (np.abs(star_coords[:, 0]) < fov_limit) & \
-                    (np.abs(star_coords[:, 1]) < fov_limit)
+        star_fov_mask = (np.abs(star_coords[:, 0]) < fov_limit) & \
+                        (np.abs(star_coords[:, 1]) < fov_limit)
         
-        print(f"Stars in FOV: {np.sum(star_mask)} / {target_galaxy.stars.nparticles}", flush=True)
+        star_indices = np.where(star_fov_mask)[0]
+        n_stars_fov = len(star_indices)
+        print(f"Stars in FOV: {n_stars_fov} / {target_galaxy.stars.nparticles}", flush=True)
 
-        # Gas Mask (FOV + Buffer)
+        # Downsample Stars
+        star_weight_scale = 1.0
+        if n_stars_fov > PARTICLE_LIMIT:
+            print(f"Downsampling stars to {PARTICLE_LIMIT}...", flush=True)
+            sampled_indices = np.random.choice(star_indices, PARTICLE_LIMIT, replace=False)
+            star_weight_scale = n_stars_fov / PARTICLE_LIMIT
+        else:
+            sampled_indices = star_indices
+            
+        # Create Optimized Stars Object
+        opt_stars = Stars(
+            initial_masses=target_galaxy.stars.initial_masses[sampled_indices],
+            ages=target_galaxy.stars.ages[sampled_indices],
+            metallicities=target_galaxy.stars.metallicities[sampled_indices],
+            coordinates=target_galaxy.stars.coordinates[sampled_indices],
+            current_masses=target_galaxy.stars.current_masses[sampled_indices],
+            smoothing_lengths=target_galaxy.stars.smoothing_lengths[sampled_indices],
+            velocities=target_galaxy.stars.velocities[sampled_indices] if target_galaxy.stars.velocities is not None else None,
+            redshift=target_galaxy.stars.redshift,
+            centre=target_galaxy.stars.centre
+        )
+
+        # --- GAS FILTERING ---
         gas_coords = target_galaxy.gas.coordinates
         if target_galaxy.gas.centre is not None:
             gas_coords -= target_galaxy.gas.centre
             
         gas_limit = fov_limit + gas_buffer
-        gas_mask = (np.abs(gas_coords[:, 0]) < gas_limit) & \
-                   (np.abs(gas_coords[:, 1]) < gas_limit)
-                   
-        print(f"Gas in FOV+Buffer: {np.sum(gas_mask)} / {target_galaxy.gas.nparticles}", flush=True)
-        
-        # Create a filtered Gas object for the calculation
-        # We need to extract arrays and slice them
-        print("Creating filtered Gas object...", flush=True)
-        
-        # Handle optional attributes safely
-        gas_velocities = target_galaxy.gas.velocities[gas_mask] if target_galaxy.gas.velocities is not None else None
-        
-        filtered_gas = Gas(
-            masses=target_galaxy.gas.masses[gas_mask],
-            metallicities=target_galaxy.gas.metallicities[gas_mask],
-            coordinates=target_galaxy.gas.coordinates[gas_mask],
-            velocities=gas_velocities,
-            smoothing_lengths=target_galaxy.gas.smoothing_lengths[gas_mask],
-            dust_masses=target_galaxy.gas.dust_masses[gas_mask],
+        gas_fov_mask = (np.abs(gas_coords[:, 0]) < gas_limit) & \
+                       (np.abs(gas_coords[:, 1]) < gas_limit)
+                       
+        gas_indices = np.where(gas_fov_mask)[0]
+        n_gas_fov = len(gas_indices)
+        print(f"Gas in FOV+Buffer: {n_gas_fov} / {target_galaxy.gas.nparticles}", flush=True)
+
+        # Downsample Gas
+        if n_gas_fov > PARTICLE_LIMIT:
+            print(f"Downsampling gas to {PARTICLE_LIMIT}...", flush=True)
+            sampled_gas_indices = np.random.choice(gas_indices, PARTICLE_LIMIT, replace=False)
+        else:
+            sampled_gas_indices = gas_indices
+
+        # Create Optimized Gas Object
+        opt_gas = Gas(
+            masses=target_galaxy.gas.masses[sampled_gas_indices],
+            metallicities=target_galaxy.gas.metallicities[sampled_gas_indices],
+            coordinates=target_galaxy.gas.coordinates[sampled_gas_indices],
+            velocities=target_galaxy.gas.velocities[sampled_gas_indices] if target_galaxy.gas.velocities is not None else None,
+            smoothing_lengths=target_galaxy.gas.smoothing_lengths[sampled_gas_indices],
+            dust_masses=target_galaxy.gas.dust_masses[sampled_gas_indices],
             redshift=target_galaxy.gas.redshift,
             centre=target_galaxy.gas.centre
         )
-        print("Filtered Gas object created.", flush=True)
         
-        # Temporarily replace gas object
+        # Temporarily replace galaxy components for tau_v calculation
+        original_stars = target_galaxy.stars
         original_gas = target_galaxy.gas
-        target_galaxy.gas = filtered_gas
+        target_galaxy.stars = opt_stars
+        target_galaxy.gas = opt_gas
         
-        # Calculate tau_v using the filtered gas and masked stars
-        # Use nthreads=-1 for all available cores
-        print("Starting get_stellar_los_tau_v calculation (this may take a while)...", flush=True)
-        tau_v_masked = target_galaxy.get_stellar_los_tau_v(
+        # Calculate tau_v
+        print("Starting get_stellar_los_tau_v calculation (this should be fast now)...", flush=True)
+        tau_v_opt = target_galaxy.get_stellar_los_tau_v(
             kappa=kappa,
             kernel=kernel,
-            mask=star_mask,
             nthreads=-1 
         )
         print("get_stellar_los_tau_v calculation complete.", flush=True)
         
-        # Restore original gas
+        # Calculate Particle Spectra for Optimized Stars
+        print("Calculating particle spectra...", flush=True)
+        spectra_dict = target_galaxy.stars.get_particle_spectra(
+            model, 
+            tau_v=tau_v_opt
+        )
+        
+        # Restore original galaxy components
+        target_galaxy.stars = original_stars
         target_galaxy.gas = original_gas
         
-        tau_v = tau_v_masked
-        print(f"Mean tau_v (in FOV): {np.mean(tau_v[star_mask]):.3f}", flush=True)
-        print(f"Max tau_v (in FOV): {np.max(tau_v[star_mask]):.3f}", flush=True)
+        spec_key = "attenuated" 
+        if spec_key not in spectra_dict:
+            spec_key = list(spectra_dict.keys())[0]
         
+        particle_spectra = spectra_dict[spec_key] # (n_sampled_stars, n_lam)
+
+        # Calculate Photometry (Flux)
+        print("Calculating photometry...", flush=True)
+        lam = grid.lam # Angstrom
+        trans_effective = np.interp(lam * (1 + z_obs), vis_filter.lam, vis_filter.transmission, left=0, right=0)
+        
+        # Integrate L_rest * T_effective
+        luminosity_in_band = np.trapz(particle_spectra * trans_effective, x=lam, axis=1)
+        
+        # Convert to Flux (erg/s/cm^2)
+        flux_in_band = luminosity_in_band / (4 * np.pi * d_lum**2)
+        
+        # SCALE FLUX to account for downsampling
+        flux_in_band *= star_weight_scale
+        
+        # Use opt_stars coordinates for imaging
+        coords_for_img = opt_stars.coordinates
+        if opt_stars.centre is not None:
+            coords_for_img -= opt_stars.centre
+            
     else:
-        print("No gas found. Cannot calculate physical dust. Using tau_v = 0.", flush=True)
-        tau_v = 0.0
+        print("No gas found. Using tau_v = 0 and full star population (if small) or downsampling.", flush=True)
+        # Handle case with no gas (similar downsampling if needed)
+        # For brevity, assuming gas exists in TNG50 subhalo 0.
+        return
 
-    # Calculate Particle Spectra
-    print("Calculating particle spectra...", flush=True)
-    spectra_dict = target_galaxy.stars.get_particle_spectra(
-        model, 
-        tau_v=tau_v
-    )
-    
-    spec_key = "attenuated" 
-    if spec_key not in spectra_dict:
-        spec_key = list(spectra_dict.keys())[0]
-    
-    particle_spectra = spectra_dict[spec_key] # (n_particles, n_lam)
-
-    # Calculate Photometry (Flux)
-    print("Calculating photometry...", flush=True)
-    lam = grid.lam # Angstrom
-    trans = vis_filter.transmission
-    
-    # Integrate to get Luminosity in band (erg/s)
-    # To get observed flux:
-    # 1. Redshift the spectrum: lam_obs = lam_rest * (1+z)
-    # 2. Apply filter in observed frame.
-    
-    trans_effective = np.interp(lam * (1 + z_obs), vis_filter.lam, vis_filter.transmission, left=0, right=0)
-    
-    # Integrate L_rest * T_effective
-    luminosity_in_band = np.trapz(particle_spectra * trans_effective, x=lam, axis=1)
-    
-    # Convert to Flux (erg/s/cm^2)
-    flux_in_band = luminosity_in_band / (4 * np.pi * d_lum**2)
-    
     # Generate Image
     print("Generating image...", flush=True)
-    # Pixel scale
-    pixel_scale_arcsec = 0.1 # Euclid VIS
-    pixel_scale_kpc = pixel_scale_arcsec * scale_kpc_per_arcsec
+    print(f"FOV: {fov_kpc:.1f} kpc ({fov_arcsec:.1f} arcsec)")
+    print(f"Resolution: {resolution} x {resolution} pixels")
     
-    # FOV
-    # Let's define a FOV that covers the galaxy. 
-    # TNG50 massive galaxies can be 50-100 kpc.
-    # fov_kpc = 100.0 # Defined earlier
-    # fov_arcsec = fov_kpc / scale_kpc_per_arcsec
-    resolution = int(fov_arcsec / pixel_scale_arcsec)
-    
-    print(f"FOV: {fov_kpc:.1f} kpc ({fov_arcsec:.1f} arcsec)", flush=True)
-    print(f"Resolution: {resolution} x {resolution} pixels", flush=True)
-    
-    coords = target_galaxy.stars.coordinates
-    if target_galaxy.stars.centre is not None:
-        coords -= target_galaxy.stars.centre
-    
-    # Select particles in FOV
-    mask = (np.abs(coords[:, 0]) < fov_kpc/2 * kpc) & (np.abs(coords[:, 1]) < fov_kpc/2 * kpc)
-    
-    x = coords[mask, 0].to(kpc).value
-    y = coords[mask, 1].to(kpc).value
-    weights = flux_in_band[mask]
+    x = coords_for_img[:, 0].to(kpc).value
+    y = coords_for_img[:, 1].to(kpc).value
+    weights = flux_in_band
     
     hist, _, _ = np.histogram2d(
         x, y, 
@@ -322,8 +321,6 @@ def generate_euclid_vis_image():
 
     # Apply PSF
     print("Applying PSF...", flush=True)
-    # Euclid VIS PSF FWHM ~ 0.16 arcsec
-    # Sigma = FWHM / 2.355
     fwhm_arcsec = 0.16
     sigma_arcsec = fwhm_arcsec / 2.355
     sigma_pixels = sigma_arcsec / pixel_scale_arcsec
@@ -341,6 +338,8 @@ def generate_euclid_vis_image():
     hdu.header['PIXSCALE'] = (pixel_scale_arcsec, 'arcsec/pixel')
     hdu.header['UNITS'] = 'erg/s/cm^2'
     hdu.header['FOV_KPC'] = fov_kpc
+    hdu.header['DOWNSAMP'] = (PARTICLE_LIMIT, 'Max particles sampled')
+    hdu.header['WSCALE'] = (star_weight_scale, 'Weight scale factor')
     
     if not os.path.exists(OUTPUT_PATH):
         os.makedirs(OUTPUT_PATH, exist_ok=True)

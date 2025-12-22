@@ -71,35 +71,66 @@ def generate_euclid_vis_image():
 
     # Load Euclid VIS Filter
     print("Loading Euclid VIS filter...")
-    # Define Euclid VIS filter manually to avoid SVO issues
-    # Approximate transmission curve (top-hat-like but with wings)
-    # VIS covers 5500 - 9000 Angstroms
-    vis_lam = np.linspace(5000, 9500, 1000) * Angstrom
-    vis_trans = np.zeros_like(vis_lam)
-    mask = (vis_lam.value >= 5500) & (vis_lam.value <= 9000)
-    vis_trans[mask] = 1.0 # Simple top-hat for now, but defined as a generic filter
+    vis_filter = None
     
-    try:
-        # Try SVO first with correct code if known, but "Euclid/VIS" is likely wrong.
-        # Common format is Observatory/Instrument.Filter
-        # Let's try to just use the manual definition which is robust.
-        vis_filter = Filter(
-            "Euclid/VIS_manual",
-            transmission=vis_trans,
-            new_lam=vis_lam
-        )
-        # Re-interpolate to grid wavelength
-        vis_filter.resample_transmission(grid.lam)
+    # 1. Try Local ASCII File (User provided)
+    # Check GRID_DIR as requested
+    local_filter_path = os.path.join(GRID_DIR, 'Euclid_VIS.vis.dat')
+    if os.path.exists(local_filter_path):
+        print(f"Found local filter at {local_filter_path}. Loading...")
+        try:
+            # Assuming 2 columns: Wavelength (Angstrom), Transmission
+            data = np.loadtxt(local_filter_path)
+            # SVO usually provides Angstroms. Check if valid.
+            lam_local = data[:, 0] * Angstrom
+            trans_local = data[:, 1]
+            
+            vis_filter = Filter(
+                "Euclid/VIS_local",
+                transmission=trans_local,
+                new_lam=lam_local
+            )
+            vis_filter._interpolate_wavelength(grid.lam)
+            print("Successfully loaded local Euclid_VIS.vis.dat.")
+        except Exception as e:
+            print(f"Failed to load local file: {e}")
+
+    # 2. Try SVO (Euclid/VIS.vis)
+    if vis_filter is None:
+        try:
+            print("Attempting to load Euclid/VIS.vis from SVO...")
+            filters = FilterCollection(
+                filter_codes=["Euclid/VIS.vis"], 
+                new_lam=grid.lam
+            )
+            vis_filter = filters[0]
+            print("Successfully loaded Euclid/VIS.vis from SVO.")
+        except Exception as e:
+            print(f"Could not load Euclid/VIS.vis from SVO: {e}")
+
+    # 3. Fallback to Manual Definition
+    if vis_filter is None:
+        print("Falling back to manual definition...")
+        vis_lam = np.linspace(5000, 9500, 1000) * Angstrom
+        vis_trans = np.zeros_like(vis_lam)
+        mask = (vis_lam.value >= 5500) & (vis_lam.value <= 9000)
+        vis_trans[mask] = 1.0 
         
-    except Exception as e:
-        print(f"Could not create manual filter: {e}")
-        print("Using a top-hat approximation (5500-9000 A)...")
-        # Fix: Add units to lam_min and lam_max
-        filters = FilterCollection(
-            tophat_dict={"Euclid_VIS_approx": {"lam_min": 5500 * Angstrom, "lam_max": 9000 * Angstrom}},
-            new_lam=grid.lam
-        )
-        vis_filter = filters[0]
+        try:
+            vis_filter = Filter(
+                "Euclid/VIS_manual",
+                transmission=vis_trans,
+                new_lam=vis_lam
+            )
+            vis_filter._interpolate_wavelength(grid.lam)
+        except Exception as e2:
+            print(f"Could not create manual filter: {e2}")
+            print("Using a top-hat approximation (5500-9000 A)...")
+            filters = FilterCollection(
+                tophat_dict={"Euclid_VIS_approx": {"lam_min": 5500 * Angstrom, "lam_max": 9000 * Angstrom}},
+                new_lam=grid.lam
+            )
+            vis_filter = filters[0]
 
     # Define Dust Model
     print("Configuring dust model...")

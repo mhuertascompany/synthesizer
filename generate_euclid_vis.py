@@ -1,10 +1,6 @@
-import sys
-import os
-# Force usage of local source code to pick up changes to load_IllustrisTNG
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
-
 import numpy as np
 import matplotlib.pyplot as plt
+import os
 from unyt import Myr, kpc, arcsec, Angstrom, Msun, pc
 from synthesizer.load_data.load_illustris import load_IllustrisTNG
 from synthesizer.grid import Grid

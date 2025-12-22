@@ -212,11 +212,14 @@ def generate_euclid_vis_image():
         # We need to extract arrays and slice them
         print("Creating filtered Gas object...", flush=True)
         
+        # Handle optional attributes safely
+        gas_velocities = target_galaxy.gas.velocities[gas_mask] if target_galaxy.gas.velocities is not None else None
+        
         filtered_gas = Gas(
             masses=target_galaxy.gas.masses[gas_mask],
             metallicities=target_galaxy.gas.metallicities[gas_mask],
             coordinates=target_galaxy.gas.coordinates[gas_mask],
-            velocities=target_galaxy.gas.velocities[gas_mask],
+            velocities=gas_velocities,
             smoothing_lengths=target_galaxy.gas.smoothing_lengths[gas_mask],
             dust_masses=target_galaxy.gas.dust_masses[gas_mask],
             redshift=target_galaxy.gas.redshift,

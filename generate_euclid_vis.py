@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import os
 from unyt import Myr, kpc, arcsec, Angstrom, Msun, pc
 from synthesizer.load_data.load_illustris import load_IllustrisTNG
 from synthesizer.grid import Grid
@@ -23,18 +24,20 @@ OUTPUT_PATH="/u/mhuertas/data/euclid/tngmocks"
 def generate_euclid_vis_image():
     print("Loading TNG data...")
     # Load TNG data
-    # We assume the user wants the snapshot specified here.
-    # If z=0 (snap 99), we might need to place it at a fictitious redshift for "observation".
-    galaxy = load_IllustrisTNG(
+    # We load just one massive galaxy to accelerate debugging.
+    # You can find subhalo IDs in the TNG group catalog.
+    # For TNG50-1 snap 99, subhalo 0 is usually the most massive.
+    galaxies, subhalo_mask = load_IllustrisTNG(
         directory=TNG_PATH,
         snap_number=99,  # z=0
-        stellar_mass_limit=1e10, 
+        subhalo_ids=[0], # Load just the first subhalo
     )
 
-    if isinstance(galaxy, list):
-        target_galaxy = galaxy[0]
-    else:
-        target_galaxy = galaxy
+    if len(galaxies) == 0:
+        print("No galaxies found!")
+        return
+
+    target_galaxy = galaxies[0]
     
     print(f"Selected galaxy: {target_galaxy.name}")
     try:
@@ -215,8 +218,11 @@ def generate_euclid_vis_image():
     hdu.header['UNITS'] = 'erg/s/cm^2'
     hdu.header['FOV_KPC'] = fov_kpc
     
+    if not os.path.exists(OUTPUT_PATH):
+        os.makedirs(OUTPUT_PATH, exist_ok=True)
+    
     hdu.writeto(os.path.join(OUTPUT_PATH, 'euclid_vis_galaxy.fits'), overwrite=True)
-    print("Done! Saved to euclid_vis_galaxy.fits")
+    print(f"Done! Saved to {os.path.join(OUTPUT_PATH, 'euclid_vis_galaxy.fits')}")
 
 if __name__ == "__main__":
     generate_euclid_vis_image()

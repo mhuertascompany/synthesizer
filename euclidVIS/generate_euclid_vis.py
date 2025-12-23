@@ -24,7 +24,7 @@ GRID_NAME = "bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps"
 OUTPUT_PATH="/u/mhuertas/data/euclid/tngmocks"
 
 # Optimization Parameters
-PARTICLE_LIMIT = 10000 # Reduced for quick debugging
+PARTICLE_LIMIT = 50000 # Increased for better quality, still safe for login node
 
 def generate_euclid_vis_image():
     print("Loading TNG data...", flush=True)
@@ -271,11 +271,14 @@ def generate_euclid_vis_image():
         target_galaxy.stars = original_stars
         target_galaxy.gas = original_gas
         
-        spec_key = "attenuated" 
-        if spec_key not in spectra_dict:
-            spec_key = list(spectra_dict.keys())[0]
-        
-        particle_spectra = spectra_dict[spec_key] # This is an Sed object
+        # Handle case where get_particle_spectra returns a single Sed or a dict
+        if isinstance(spectra_dict, dict):
+            spec_key = "attenuated" 
+            if spec_key not in spectra_dict:
+                spec_key = list(spectra_dict.keys())[0]
+            particle_spectra = spectra_dict[spec_key]
+        else:
+            particle_spectra = spectra_dict # It's already an Sed object
 
         # Calculate Photometry (Flux)
         print("Calculating photometry (memory-efficient)...", flush=True)

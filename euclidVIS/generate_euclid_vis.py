@@ -24,7 +24,7 @@ GRID_NAME = "bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps"
 OUTPUT_PATH="/u/mhuertas/data/euclid/tngmocks"
 
 # Optimization Parameters
-PARTICLE_LIMIT = 1000000 # Max particles to process for tau_v and spectra
+PARTICLE_LIMIT = 100000 # Max particles to process for tau_v and spectra
 
 def generate_euclid_vis_image():
     print("Loading TNG data...", flush=True)
@@ -278,28 +278,37 @@ def generate_euclid_vis_image():
         particle_spectra = spectra_dict[spec_key] # This is an Sed object
 
         # Calculate Photometry (Flux)
-        print("Calculating photometry (parallelized)...", flush=True)
-        # 1. Calculate fnu (observed frame)
-        particle_spectra.get_fnu(cosmo, z_obs)
+        print("Calculating photometry (memory-efficient)...", flush=True)
+        # We calculate photometry in the rest-frame and then scale to flux
+        # This avoids creating a huge fnu array for 1M particles
         
-        # 2. Calculate integrated flux efficiently
-        # We want \int F_nu T_nu dnu
-        # Interpolate transmission onto the observed wavelength grid
-        t_lam = np.interp(
-            particle_spectra.obslam.to(Angstrom).value, 
-            vis_filter.lam.to(Angstrom).value, 
-            vis_filter.transmission, 
+        # 1. Get rest-frame frequency and luminosity
+        # particle_spectra.lnu is (n_particles, n_lam)
+        nu_rest = particle_spectra.nu.to('Hz').value
+        lnu_rest = particle_spectra.lnu.to('erg/s/Hz').value
+        
+        # 2. Interpolate filter transmission to rest-frame
+        # T_rest(nu_rest) = T_obs(nu_rest / (1+z))
+        # Or T_rest(lam_rest) = T_obs(lam_rest * (1+z))
+        t_rest = np.interp(
+            particle_spectra.lam.to(Angstrom).value * (1 + z_obs),
+            vis_filter.lam.to(Angstrom).value,
+            vis_filter.transmission,
             left=0, right=0
         )
         
-        # Integrate F_nu * T_nu over nu
-        # Note: obsnu is descending, so we take the absolute value of trapz
-        # We ensure units are consistent for the integration
-        flux_in_band = np.abs(np.trapz(
-            (particle_spectra.fnu * t_lam).to('erg/s/cm**2/Hz').value, 
-            x=particle_spectra.obsnu.to('Hz').value, 
+        # 3. Integrate L_nu * T over nu_rest
+        # Note: nu_rest is descending, so we take absolute value of trapz
+        luminosity_in_band = np.abs(np.trapz(
+            lnu_rest * t_rest,
+            x=nu_rest,
             axis=-1
         ))
+        
+        # 4. Convert to Flux (erg/s/cm^2)
+        # F = L / (4 * pi * d_lum**2)
+        # Note: the (1+z) factors cancel out in the nu integration as derived
+        flux_in_band = luminosity_in_band / (4 * np.pi * d_lum.to('cm').value**2)
         
         # SCALE FLUX to account for downsampling
         flux_in_band *= star_weight_scale

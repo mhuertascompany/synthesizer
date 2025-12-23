@@ -1,0 +1,28 @@
+#!/bin/bash -l
+#
+# Multi-core job script for MPCDF VERA.
+#
+#SBATCH -J EUCLID_VIS
+#SBATCH -o /u/mhuertas/data/synthesizer/logs/out.%j
+#SBATCH -e /u/mhuertas/data/synthesizer/logs/err.%j
+#SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
+#SBATCH -p p.vera          # Use the default VERA partition (exclusive nodes)
+#SBATCH --ntasks=1         # One task (the python script)
+#SBATCH --cpus-per-task=72 # Use all 72 cores on the node
+#SBATCH --mem=250000MB     # Use full node memory
+#SBATCH --time=0:30:00     # 30 minutes should be plenty for 100k particles
+
+module purge
+module load gcc/10 impi/2021.2
+module load anaconda/3/2021.05
+
+# Set number of threads for parallelized synthesizer calls
+export OMP_NUM_THREADS=72
+export MKL_NUM_THREADS=72
+export OPENBLAS_NUM_THREADS=72
+
+# activate virtual environment
+source /u/mhuertas/python/envs/synth/bin/activate
+
+# Run the program
+srun python3 ./generate_euclid_vis.py

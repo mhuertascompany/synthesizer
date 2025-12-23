@@ -343,7 +343,10 @@ def generate_euclid_vis_image():
         weights=weights
     )
     
-    img = Image(img=hist, fov=fov_kpc*kpc, resolution=resolution)
+    # Create Image object
+    # Note: synthesizer.Image expects resolution to be the pixel size with units
+    pixel_size = (fov_kpc / resolution) * kpc
+    img = Image(img=hist, fov=fov_kpc*kpc, resolution=pixel_size)
 
     # Apply PSF
     print("Applying PSF...", flush=True)
@@ -352,7 +355,7 @@ def generate_euclid_vis_image():
     sigma_pixels = sigma_arcsec / pixel_scale_arcsec
     
     print(f"PSF Sigma: {sigma_pixels:.2f} pixels", flush=True)
-    img_smoothed = gaussian_filter(img.img, sigma=sigma_pixels)
+    img_smoothed = gaussian_filter(img.arr, sigma=sigma_pixels)
     
     # Save as FITS
     print("Saving FITS image...", flush=True)

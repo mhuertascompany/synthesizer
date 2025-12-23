@@ -13,8 +13,8 @@
 #SBATCH --time=0:20:00     # 20 minutes for debugging
 
 module purge
-module load gcc/10 impi/2021.2
-module load anaconda/3/2021.05
+module load gcc/15 impi/2021.2
+module load anaconda/3/2023.03
 
 # Set number of threads for parallelized synthesizer calls
 export OMP_NUM_THREADS=18

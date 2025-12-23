@@ -24,7 +24,7 @@ GRID_NAME = "bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps"
 OUTPUT_PATH="/u/mhuertas/data/euclid/tngmocks"
 
 # Optimization Parameters
-PARTICLE_LIMIT = 100000 # Max particles to process for tau_v and spectra
+PARTICLE_LIMIT = 10000 # Reduced for quick debugging
 
 def generate_euclid_vis_image():
     print("Loading TNG data...", flush=True)
@@ -260,11 +260,11 @@ def generate_euclid_vis_image():
         print("get_stellar_los_tau_v calculation complete.", flush=True)
         
         # Calculate Particle Spectra for Optimized Stars
-        print("Calculating particle spectra (parallelized)...", flush=True)
+        print("Calculating particle spectra (nthreads=1)...", flush=True)
         spectra_dict = target_galaxy.stars.get_particle_spectra(
             model, 
             tau_v=tau_v_opt,
-            nthreads=-1
+            nthreads=1
         )
         
         # Restore original galaxy components

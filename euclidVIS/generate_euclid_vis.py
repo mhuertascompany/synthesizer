@@ -24,7 +24,7 @@ GRID_NAME = "bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps"
 OUTPUT_PATH="/u/mhuertas/data/euclid/tngmocks"
 
 # Optimization Parameters
-PARTICLE_LIMIT = 50000 # Increased for better quality, still safe for login node
+PARTICLE_LIMIT = 100000 # 100k is safe and provides good quality
 
 def generate_euclid_vis_image():
     print("Loading TNG data...", flush=True)
@@ -260,11 +260,11 @@ def generate_euclid_vis_image():
         print("get_stellar_los_tau_v calculation complete.", flush=True)
         
         # Calculate Particle Spectra for Optimized Stars
-        print("Calculating particle spectra (nthreads=1)...", flush=True)
+        print(f"Calculating particle spectra for {opt_stars.nparticles} particles (nthreads=8)...", flush=True)
         spectra_dict = target_galaxy.stars.get_particle_spectra(
             model, 
             tau_v=tau_v_opt,
-            nthreads=1
+            nthreads=8
         )
         
         # Restore original galaxy components
@@ -301,8 +301,8 @@ def generate_euclid_vis_image():
         )
         
         # 3. Integrate L_nu * T over nu_rest
-        # Note: nu_rest is descending, so we take absolute value of trapz
-        luminosity_in_band = np.abs(np.trapz(
+        # Note: nu_rest is descending, so we take absolute value of trapezoid
+        luminosity_in_band = np.abs(np.trapezoid(
             lnu_rest * t_rest,
             x=nu_rest,
             axis=-1
@@ -310,8 +310,8 @@ def generate_euclid_vis_image():
         
         # 4. Convert to Flux (erg/s/cm^2)
         # F = L / (4 * pi * d_lum**2)
-        # Note: the (1+z) factors cancel out in the nu integration as derived
-        flux_in_band = luminosity_in_band / (4 * np.pi * d_lum.to('cm').value**2)
+        # Note: d_lum is already in cm from line 64
+        flux_in_band = luminosity_in_band / (4 * np.pi * d_lum**2)
         
         # SCALE FLUX to account for downsampling
         flux_in_band *= star_weight_scale

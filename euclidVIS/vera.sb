@@ -6,20 +6,20 @@
 #SBATCH -o /u/mhuertas/data/synthesizer/logs/out.%j
 #SBATCH -e /u/mhuertas/data/synthesizer/logs/err.%j
 #SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
-#SBATCH -p p.vera          # Use the default VERA partition (exclusive nodes)
+#SBATCH -p p.large         # Use shared partition for faster scheduling
 #SBATCH --ntasks=1         # One task (the python script)
-#SBATCH --cpus-per-task=72 # Use all 72 cores on the node
-#SBATCH --mem=250000MB     # Use full node memory
-#SBATCH --time=0:30:00     # 30 minutes should be plenty for 100k particles
+#SBATCH --cpus-per-task=18 # Use 18 cores (1/4 of a node)
+#SBATCH --mem=64000MB      # 64GB is plenty for 100k particles
+#SBATCH --time=0:20:00     # 20 minutes for debugging
 
 module purge
 module load gcc/10 impi/2021.2
 module load anaconda/3/2021.05
 
 # Set number of threads for parallelized synthesizer calls
-export OMP_NUM_THREADS=72
-export MKL_NUM_THREADS=72
-export OPENBLAS_NUM_THREADS=72
+export OMP_NUM_THREADS=18
+export MKL_NUM_THREADS=18
+export OPENBLAS_NUM_THREADS=18
 
 # activate virtual environment
 source /u/mhuertas/python/envs/synth/bin/activate

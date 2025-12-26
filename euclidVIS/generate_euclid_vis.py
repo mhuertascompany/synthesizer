@@ -113,7 +113,7 @@ def generate_euclid_vis_image(config):
         z_obs = 0.05
     
     # Calculate Distances
-    d_lum = cosmo.luminosity_distance(z_obs).to(u.cm).value
+    d_lum = unyt_quantity.from_astropy(cosmo.luminosity_distance(z_obs).to(u.cm))
     scale_kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_obs).value / 60.0
     
     print(f"Observation Redshift: {z_obs}", flush=True)
@@ -250,7 +250,7 @@ def generate_euclid_vis_image(config):
         )
         
         luminosity_in_band = np.abs(np.trapezoid(lnu_rest * t_rest, x=nu_rest, axis=-1))
-        flux_in_band = (luminosity_in_band * star_weight_scale) / (4 * np.pi * d_lum**2)
+        flux_in_band = (luminosity_in_band * star_weight_scale) / (4 * np.pi * d_lum.value**2)
         
         # Imaging
         print("Generating image...", flush=True)

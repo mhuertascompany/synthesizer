@@ -1,0 +1,38 @@
+# Euclid VIS Generation Configuration
+
+paths:
+  tng_path: "/virgotng/universe/IllustrisTNG/TNG50-1/output"
+  grid_dir: "/u/mhuertas/data/synthesizer"
+  output_path: "/u/mhuertas/data/euclid/tngmocks"
+  filter_file: "Euclid_VIS.vis.dat" # Looked for in grid_dir
+
+simulation:
+  snap_number: 99
+  subhalo_ids: [0]
+  grid_name: "bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps"
+
+observation:
+  z_obs: null # If null, use galaxy redshift. If < 0.001, defaults to 0.05
+  fov_kpc: 100.0
+  pixel_scale_arcsec: 0.1
+  fwhm_arcsec: 0.16 # PSF FWHM
+
+model:
+  kappa: 20.0
+  dust_to_metal: 0.4
+  dust_curve: "Calzetti2000"
+
+optimization:
+  particle_limit: 100000 # Set to null or -1 to disable limit (use all particles)
+  nthreads_spectra: 8
+  nthreads_tau_v: -1
+
+desi:
+  enabled: true
+  fiber_diameter_arcsec: 1.5
+  output_name: "desi_spectrum.fits"
+  lam_min: 3600.0
+  lam_max: 9800.0
+  d_lam: 0.1
+  R_min: 2000.0
+  R_max: 5000.0

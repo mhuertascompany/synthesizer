@@ -137,8 +137,8 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     desi_conf = config.get('desi', {})
     proj = config.get('projection', {})
     
-    # Get stellar mass for metadata
-    stellar_mass = float(target_galaxy.stars.mass.to(Msun).value)
+    # Get stellar mass for metadata (sum of initial masses)
+    stellar_mass = float(np.sum(target_galaxy.stars.initial_masses).to(Msun).value)
 
     print(f"\nProcessing Subhalo {subhalo_id}...", flush=True)
 
@@ -318,10 +318,12 @@ def generate_euclid_vis_image(config):
     print(f"Loading TNG data for snap {sim['snap_number']}...", flush=True)
     limit = sim.get('stellar_mass_limit', 1e10)
     subhalo_ids = sim.get('subhalo_ids')
+    if sim.get('batch', False):
+        subhalo_ids = None # Ignore specific IDs if batch mode is on
     
     galaxies, subhalo_mask = load_IllustrisTNG(
         directory=paths['tng_path'], snap_number=sim['snap_number'], 
-        stellar_mass_limit=limit if not subhalo_ids else 8.5e6, # fallback if ids provided
+        stellar_mass_limit=limit,
         subhalo_ids=subhalo_ids, verbose=True
     )
 

@@ -16,30 +16,8 @@ from synthesizer.particle.stars import Stars
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from scipy.interpolate import interp1d
 from astropy.io import fits
+from astropy.cosmology import Planck15 as cosmo
 import astropy.units as u
-import illustris_python.snapshot as il_snap
-
-# Monkey-patch illustris_python to handle missing SubfindHsml for stars
-_original_loadSubhalo = il_snap.loadSubhalo
-
-def _robust_loadSubhalo(basePath, snapNum, subhaloID, partType, fields=None):
-    if fields is not None and 'SubfindHsml' in fields and str(partType) in ['stars', '4']:
-        try:
-            return _original_loadSubhalo(basePath, snapNum, subhaloID, partType, fields=fields)
-        except Exception as e:
-            if 'SubfindHsml' in str(e):
-                print(f"  WARNING: SubfindHsml not found for stars in Snap {snapNum}. Using fallback.", flush=True)
-                new_fields = [f for f in fields if f != 'SubfindHsml']
-                res = _original_loadSubhalo(basePath, snapNum, subhaloID, partType, fields=new_fields)
-                if res['count'] > 0:
-                    res['SubfindHsml'] = np.zeros(res['count'], dtype=np.float32)
-                return res
-            raise e
-    return _original_loadSubhalo(basePath, snapNum, subhaloID, partType, fields=fields)
-
-il_snap.loadSubhalo = _robust_loadSubhalo
-
-from synthesizer.particle.utils import calculate_smoothing_lengths
 
 def load_config():
     """Load configuration from YAML and override with command-line arguments."""
@@ -158,14 +136,11 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     paths = config['paths']
     desi_conf = config.get('desi', {})
     proj = config.get('projection', {})
+    
+    # Get stellar mass for metadata
+    stellar_mass = float(target_galaxy.stars.mass.to(Msun).value)
 
     print(f"\nProcessing Subhalo {subhalo_id}...", flush=True)
-
-    # Fallback for missing smoothing lengths
-    if target_galaxy.stars is not None:
-        if target_galaxy.stars.smoothing_lengths is None or np.all(target_galaxy.stars.smoothing_lengths.value == 0):
-            print("  Calculating missing stellar smoothing lengths...", flush=True)
-            target_galaxy.stars.smoothing_lengths = calculate_smoothing_lengths(target_galaxy.stars.coordinates)
 
     # Redshift and Distance Handling
     z_obs = obs.get('z_obs')
@@ -292,6 +267,7 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     hdu.header['OBJECT'] = f"Subhalo {subhalo_id}"
     hdu.header['REDSHIFT'] = z_obs
     hdu.header['SUBHALO'] = subhalo_id
+    hdu.header['MASS'] = stellar_mass
     hdu.writeto(os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}.fits"), overwrite=True)
     print(f"  Euclid images saved to {euclid_dir}", flush=True)
 
@@ -303,7 +279,8 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         if np.sum(mask) > 0:
             lnu_fiber = np.sum(particle_spectra.lnu[mask], axis=0) * star_weight_scale
             fnu_fiber = (lnu_fiber / (4 * np.pi * d_lum**2)).to('erg/s/cm**2/Hz').value
-            lam_obs = particle_spectra.lam.to(Angstrom).value
+            # Wavelength is redshifted to the observer frame
+            lam_obs = particle_spectra.lam.to(Angstrom).value * (1 + z_obs)
             
             # Save DESI
             desi_dir = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", "DESI")
@@ -323,8 +300,17 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             hdu_desi = fits.BinTableHDU.from_columns(fits.ColDefs(cols_conv))
             hdu_desi.header['REDSHIFT'] = z_obs
             hdu_desi.header['SUBHALO'] = subhalo_id
+            hdu_desi.header['MASS'] = stellar_mass
             hdu_desi.writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}.fits"), overwrite=True)
             print(f"  DESI spectra saved to {desi_dir}", flush=True)
+
+    # 4. Update Catalog
+    cat_path = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", "catalog.csv")
+    write_header = not os.path.exists(cat_path)
+    with open(cat_path, 'a') as f:
+        if write_header:
+            f.write("subhalo_id,redshift,stellar_mass\n")
+        f.write(f"{subhalo_id},{z_obs:.6f},{stellar_mass:.4e}\n")
 
 def generate_euclid_vis_image(config):
     paths, sim = config['paths'], config['simulation']
@@ -360,8 +346,17 @@ def generate_euclid_vis_image(config):
     all_subhalo_indices = np.where(subhalo_mask)[0]
     
     print(f"Starting batch processing of {len(galaxies)} galaxies...", flush=True)
+    obs_conf = config['observation']
     for i, galaxy in enumerate(galaxies):
         subhalo_id = all_subhalo_indices[i]
+        
+        # Randomize redshift if requested
+        if obs_conf.get('randomize_redshift', False):
+            z_min, z_max = obs_conf.get('z_min', 0.0), obs_conf.get('z_max', 1.5)
+            z_rand = float(np.random.uniform(z_min, z_max))
+            obs_conf['z_obs'] = z_rand
+            print(f"  [{i+1}/{len(galaxies)}] Subhalo {subhalo_id}: Assigning random redshift z={z_rand:.4f}", flush=True)
+            
         try:
             process_galaxy(galaxy, subhalo_id, grid, vis_filter, model, config)
         except Exception as e:

@@ -7,7 +7,7 @@ paths:
   filter_file: "Euclid_VIS.vis.dat" # Looked for in grid_dir
 
 simulation:
-  snap_number: 95
+  snap_number: 99
   stellar_mass_limit: 1.0e10 # Msun
   batch: true # Process all galaxies above limit if true
   subhalo_ids: [0] # Used if batch is false or specific IDs are needed
@@ -15,7 +15,10 @@ simulation:
 
 observation:
   z_obs: null # If null, use galaxy redshift. If < 0.001, defaults to 0.05
-  fov_kpc: 50.0
+  randomize_redshift: true # Assignment random redshift between z_min and z_max
+  z_min: 0.0
+  z_max: 1.5
+  fov_kpc: 100.0
   pixel_scale_arcsec: 0.1
   fwhm_arcsec: 0.16 # PSF FWHM
 

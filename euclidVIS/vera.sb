@@ -9,7 +9,7 @@
 #SBATCH -p p.vera          # Use default partition for exclusive node access
 #SBATCH --ntasks=1         # One task (the python script)
 #SBATCH --cpus-per-task=72 # Use 72 cores (full node)
-#SBATCH --mem=256000MB     # 256GB for full snapshot
+#SBATCH --mem=240000MB     # Reduced to fit p.vera limit (250GB)
 #SBATCH --time=24:00:00    # 24 hours
 
 module purge

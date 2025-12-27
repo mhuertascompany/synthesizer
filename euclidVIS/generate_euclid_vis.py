@@ -99,6 +99,40 @@ def load_config():
     
     return config
 
+def safe_rotate(component, phi=None, theta=None, proj_type='manual'):
+    """Safelysource /u/mhuertas/python/envs/synth/bin/activate
+
+# Add local synthesizer to path to pick up bugfixes
+export PYTHONPATH=/vera/u/mhuertas/python/synthesizer/src:$PYTHONPATH
+
+# Run the program
+e velocities are None."""
+    if component is None:
+        return
+
+    if proj_type == 'face-on':
+        if component.velocities is None:
+            print(f"  WARNING: Cannot rotate {component.name} face-on without velocities. Skipping.")
+            return
+        component.rotate_face_on()
+    elif proj_type == 'edge-on':
+        if component.velocities is None:
+            print(f"  WARNING: Cannot rotate {component.name} edge-on without velocities. Skipping.")
+            return
+        component.rotate_edge_on()
+    else:
+        # manual or random
+        # If velocities are None, we temporarily set them to zeros to avoid library bugs
+        # then set them back to None after rotation.
+        vels_none = component.velocities is None
+        if vels_none:
+            component.velocities = np.zeros_like(component.coordinates)
+        
+        component.rotate_particles(phi=phi, theta=theta)
+        
+        if vels_none:
+            component.velocities = None
+
 def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     """Core logic to process a single galaxy and save its outputs."""
     obs = config['observation']
@@ -127,22 +161,22 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     if proj_type == 'random':
         phi, theta = np.random.uniform(0, 2*np.pi), np.random.uniform(0, np.pi)
         print(f"  Projection: random (phi={phi:.3f}, theta={theta:.3f})")
-        target_galaxy.stars.rotate_particles(phi=phi*rad, theta=theta*rad)
-        target_galaxy.gas.rotate_particles(phi=phi*rad, theta=theta*rad)
+        safe_rotate(target_galaxy.stars, phi=phi*rad, theta=theta*rad, proj_type='random')
+        safe_rotate(target_galaxy.gas, phi=phi*rad, theta=theta*rad, proj_type='random')
     elif proj_type == 'face-on':
         print("  Projection: face-on")
-        target_galaxy.stars.rotate_face_on()
-        target_galaxy.gas.rotate_face_on()
+        safe_rotate(target_galaxy.stars, proj_type='face-on')
+        safe_rotate(target_galaxy.gas, proj_type='face-on')
     elif proj_type == 'edge-on':
         print("  Projection: edge-on")
-        target_galaxy.stars.rotate_edge_on()
-        target_galaxy.gas.rotate_edge_on()
+        safe_rotate(target_galaxy.stars, proj_type='edge-on')
+        safe_rotate(target_galaxy.gas, proj_type='edge-on')
     elif proj_type == 'manual':
         phi, theta = proj.get('phi', 0.0), proj.get('theta', 0.0)
         if phi != 0 or theta != 0:
             print(f"  Projection: manual (phi={phi:.3f}, theta={theta:.3f})")
-            target_galaxy.stars.rotate_particles(phi=phi*rad, theta=theta*rad)
-            target_galaxy.gas.rotate_particles(phi=phi*rad, theta=theta*rad)
+            safe_rotate(target_galaxy.stars, phi=phi*rad, theta=theta*rad, proj_type='manual')
+            safe_rotate(target_galaxy.gas, phi=phi*rad, theta=theta*rad, proj_type='manual')
 
     # FOV and Resolution
     fov_kpc = obs['fov_kpc']

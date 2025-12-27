@@ -33,6 +33,8 @@ def load_config():
     
     # Simulation
     parser.add_argument('--snap', type=int, help='TNG snapshot number')
+    parser.add_argument('--stellar_mass_limit', type=float, help='Stellar mass limit (Msun)')
+    parser.add_argument('--batch', type=bool, help='Enable batch processing')
     parser.add_argument('--subhalo_ids', type=int, nargs='+', help='Subhalo IDs to load')
     parser.add_argument('--grid_name', type=str, help='Spectral grid name')
     
@@ -66,7 +68,7 @@ def load_config():
         print(f"WARNING: Config file {args.config} not found. Using internal defaults.")
         config = {
             'paths': {}, 'simulation': {}, 'observation': {}, 
-            'model': {}, 'optimization': {}
+            'model': {}, 'optimization': {}, 'projection': {}, 'desi': {}
         }
         
     # Override with CLI arguments if provided
@@ -74,6 +76,8 @@ def load_config():
     if args.grid_dir: config['paths']['grid_dir'] = args.grid_dir
     if args.output_path: config['paths']['output_path'] = args.output_path
     if args.snap: config['simulation']['snap_number'] = args.snap
+    if args.stellar_mass_limit: config['simulation']['stellar_mass_limit'] = args.stellar_mass_limit
+    if args.batch is not None: config['simulation']['batch'] = args.batch
     if args.subhalo_ids: config['simulation']['subhalo_ids'] = args.subhalo_ids
     if args.grid_name: config['simulation']['grid_name'] = args.grid_name
     if args.z_obs is not None: config['observation']['z_obs'] = args.z_obs
@@ -82,35 +86,29 @@ def load_config():
     if args.fwhm: config['observation']['fwhm_arcsec'] = args.fwhm
     if args.particle_limit: config['optimization']['particle_limit'] = args.particle_limit
     if args.nthreads: config['optimization']['nthreads_spectra'] = args.nthreads
-    if args.desi is not None: config['desi']['enabled'] = args.desi
     
-    if args.projection_type: config['projection']['type'] = args.projection_type
+    if args.desi is not None: 
+        if 'desi' not in config: config['desi'] = {}
+        config['desi']['enabled'] = args.desi
+    
+    if args.projection_type: 
+        if 'projection' not in config: config['projection'] = {}
+        config['projection']['type'] = args.projection_type
     if args.phi is not None: config['projection']['phi'] = args.phi
     if args.theta is not None: config['projection']['theta'] = args.theta
     
     return config
 
-def generate_euclid_vis_image(config):
-    # Extract parameters from config
-    paths = config['paths']
-    sim = config['simulation']
+def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
+    """Core logic to process a single galaxy and save its outputs."""
     obs = config['observation']
     mod = config['model']
     opt = config['optimization']
+    paths = config['paths']
+    desi_conf = config.get('desi', {})
+    proj = config.get('projection', {})
 
-    print("Loading TNG data...", flush=True)
-    galaxies, subhalo_mask = load_IllustrisTNG(
-        directory=paths['tng_path'],
-        snap_number=sim['snap_number'],
-        subhalo_ids=sim['subhalo_ids'],
-    )
-
-    if len(galaxies) == 0:
-        print("No galaxies found!", flush=True)
-        return
-
-    target_galaxy = galaxies[0]
-    print(f"Selected galaxy: {target_galaxy.name}", flush=True)
+    print(f"\nProcessing Subhalo {subhalo_id}...", flush=True)
 
     # Redshift and Distance Handling
     z_obs = obs.get('z_obs')
@@ -121,82 +119,42 @@ def generate_euclid_vis_image(config):
         print(f"WARNING: Redshift {z_obs:.4f} is too low. Using z=0.05.", flush=True)
         z_obs = 0.05
     
-    # Calculate Distances
     d_lum = unyt_quantity.from_astropy(cosmo.luminosity_distance(z_obs).to(u.cm))
     scale_kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_obs).value / 60.0
     
-    print(f"Observation Redshift: {z_obs}", flush=True)
-    print(f"Scale: {scale_kpc_per_arcsec:.3f} kpc/arcsec", flush=True)
-
     # 1. Coordinate Projections and Rotation
-    proj = config.get('projection', {})
     proj_type = proj.get('type', 'manual')
-    
     if proj_type == 'random':
-        phi = np.random.uniform(0, 2 * np.pi)
-        theta = np.random.uniform(0, np.pi)
-        print(f"Applying random projection: phi={phi:.3f}, theta={theta:.3f}", flush=True)
+        phi, theta = np.random.uniform(0, 2*np.pi), np.random.uniform(0, np.pi)
+        print(f"  Projection: random (phi={phi:.3f}, theta={theta:.3f})")
         target_galaxy.stars.rotate_particles(phi=phi*rad, theta=theta*rad)
         target_galaxy.gas.rotate_particles(phi=phi*rad, theta=theta*rad)
     elif proj_type == 'face-on':
-        print("Applying face-on projection...", flush=True)
+        print("  Projection: face-on")
         target_galaxy.stars.rotate_face_on()
         target_galaxy.gas.rotate_face_on()
     elif proj_type == 'edge-on':
-        print("Applying edge-on projection...", flush=True)
+        print("  Projection: edge-on")
         target_galaxy.stars.rotate_edge_on()
         target_galaxy.gas.rotate_edge_on()
     elif proj_type == 'manual':
-        phi = proj.get('phi', 0.0)
-        theta = proj.get('theta', 0.0)
+        phi, theta = proj.get('phi', 0.0), proj.get('theta', 0.0)
         if phi != 0 or theta != 0:
-            print(f"Applying manual projection: phi={phi:.3f}, theta={theta:.3f}", flush=True)
+            print(f"  Projection: manual (phi={phi:.3f}, theta={theta:.3f})")
             target_galaxy.stars.rotate_particles(phi=phi*rad, theta=theta*rad)
             target_galaxy.gas.rotate_particles(phi=phi*rad, theta=theta*rad)
 
-    # Load Spectral Grid
-    print(f"Loading spectral grid: {sim['grid_name']}...", flush=True)
-    grid = Grid(sim['grid_name'], grid_dir=paths['grid_dir'])
-
-    # Load Filter
-    print("Loading filter...", flush=True)
-    vis_filter = None
-    local_filter_path = os.path.join(paths['grid_dir'], paths.get('filter_file', 'Euclid_VIS.vis.dat'))
-    if os.path.exists(local_filter_path):
-        print(f"Loading local filter: {local_filter_path}", flush=True)
-        data = np.loadtxt(local_filter_path)
-        vis_filter = Filter("Euclid/VIS_local", transmission=data[:, 1], new_lam=data[:, 0] * Angstrom)
-        vis_filter._interpolate_wavelength(grid.lam)
-
-    if vis_filter is None:
-        print("Falling back to SVO Euclid/VIS.vis...", flush=True)
-        filters = FilterCollection(filter_codes=["Euclid/VIS.vis"], new_lam=grid.lam)
-        vis_filter = filters[0]
-
-    # Dust Model
-    dust_curve = Calzetti2000() # Could be parameterized if needed
-    reprocessed_model = ReprocessedEmission(grid=grid)
-    model = AttenuatedEmission(
-        grid=grid,
-        dust_curve=dust_curve,
-        apply_to=reprocessed_model,
-        emitter="stellar"
-    )
-    
     # FOV and Resolution
     fov_kpc = obs['fov_kpc']
     fov_arcsec = fov_kpc / scale_kpc_per_arcsec
     pixel_scale_arcsec = obs['pixel_scale_arcsec']
     resolution = int(fov_arcsec / pixel_scale_arcsec)
     
-    # Optimization: Filtering and Downsampling
-    particle_limit = opt.get('particle_limit')
-    if particle_limit is None or particle_limit < 0:
-        particle_limit = float('inf')
+    # Filtering and Downsampling
+    particle_limit = opt.get('particle_limit', -1)
+    if particle_limit < 0: particle_limit = float('inf')
     
     fov_limit = fov_kpc / 2 * kpc
-    
-    # Stars
     star_coords = target_galaxy.stars.coordinates
     if target_galaxy.stars.centre is not None:
         star_coords -= target_galaxy.stars.centre
@@ -205,9 +163,8 @@ def generate_euclid_vis_image(config):
     
     star_weight_scale = 1.0
     if len(star_indices) > particle_limit:
-        print(f"Downsampling stars to {particle_limit}...", flush=True)
-        sampled_indices = np.random.choice(star_indices, particle_limit, replace=False)
-        star_weight_scale = len(star_indices) / particle_limit
+        sampled_indices = np.random.choice(star_indices, int(particle_limit), replace=False)
+        star_weight_scale = len(star_indices) / int(particle_limit)
     else:
         sampled_indices = star_indices
 
@@ -223,182 +180,132 @@ def generate_euclid_vis_image(config):
         centre=target_galaxy.stars.centre
     )
 
-    # Gas
-    if target_galaxy.gas is not None:
-        if not hasattr(target_galaxy.gas, 'dust_masses'):
-            target_galaxy.gas.dust_masses = target_galaxy.gas.masses * target_galaxy.gas.metallicities * mod['dust_to_metal']
-        
-        gas_coords = target_galaxy.gas.coordinates
-        if target_galaxy.gas.centre is not None:
-            gas_coords -= target_galaxy.gas.centre
-        gas_limit = fov_limit + 50 * kpc
-        gas_fov_mask = (np.abs(gas_coords[:, 0]) < gas_limit) & (np.abs(gas_coords[:, 1]) < gas_limit)
-        gas_indices = np.where(gas_fov_mask)[0]
-        
-        if len(gas_indices) > particle_limit:
-            sampled_gas_indices = np.random.choice(gas_indices, particle_limit, replace=False)
-        else:
-            sampled_gas_indices = gas_indices
+    # Gas / Dust
+    if not hasattr(target_galaxy.gas, 'dust_masses'):
+        target_galaxy.gas.dust_masses = target_galaxy.gas.masses * target_galaxy.gas.metallicities * mod['dust_to_metal']
+    
+    gas_coords = target_galaxy.gas.coordinates
+    if target_galaxy.gas.centre is not None:
+        gas_coords -= target_galaxy.gas.centre
+    gas_fov_mask = (np.abs(gas_coords[:, 0]) < fov_limit + 50*kpc) & (np.abs(gas_coords[:, 1]) < fov_limit + 50*kpc)
+    gas_indices = np.where(gas_fov_mask)[0]
+    sampled_gas_indices = np.random.choice(gas_indices, min(len(gas_indices), int(particle_limit)), replace=False)
 
-        opt_gas = Gas(
-            masses=target_galaxy.gas.masses[sampled_gas_indices],
-            metallicities=target_galaxy.gas.metallicities[sampled_gas_indices],
-            coordinates=target_galaxy.gas.coordinates[sampled_gas_indices],
-            velocities=target_galaxy.gas.velocities[sampled_gas_indices] if target_galaxy.gas.velocities is not None else None,
-            smoothing_lengths=target_galaxy.gas.smoothing_lengths[sampled_gas_indices],
-            dust_masses=target_galaxy.gas.dust_masses[sampled_gas_indices],
-            redshift=target_galaxy.gas.redshift,
-            centre=target_galaxy.gas.centre
-        )
-        
-        # Calculate tau_v
-        original_stars, original_gas = target_galaxy.stars, target_galaxy.gas
-        target_galaxy.stars, target_galaxy.gas = opt_stars, opt_gas
-        
-        print("Calculating tau_v...", flush=True)
-        kernel = Kernel(name="cubic", binsize=1000).get_kernel()
-        tau_v_opt = target_galaxy.get_stellar_los_tau_v(
-            kappa=mod['kappa'], kernel=kernel, nthreads=opt['nthreads_tau_v']
-        )
-        
-        print(f"Calculating spectra (nthreads={opt['nthreads_spectra']})...", flush=True)
-        spectra_dict = target_galaxy.stars.get_particle_spectra(
-            model, tau_v=tau_v_opt, nthreads=opt['nthreads_spectra']
-        )
-        
-        target_galaxy.stars, target_galaxy.gas = original_stars, original_gas
-        
-        if isinstance(spectra_dict, dict):
-            particle_spectra = spectra_dict.get('attenuated', list(spectra_dict.values())[0])
-        else:
-            particle_spectra = spectra_dict
+    opt_gas = Gas(
+        masses=target_galaxy.gas.masses[sampled_gas_indices],
+        metallicities=target_galaxy.gas.metallicities[sampled_gas_indices],
+        coordinates=target_galaxy.gas.coordinates[sampled_gas_indices],
+        smoothing_lengths=target_galaxy.gas.smoothing_lengths[sampled_gas_indices],
+        dust_masses=target_galaxy.gas.dust_masses[sampled_gas_indices],
+        redshift=target_galaxy.gas.redshift,
+        centre=target_galaxy.gas.centre
+    )
+    
+    # Spectra
+    original_stars, original_gas = target_galaxy.stars, target_galaxy.gas
+    target_galaxy.stars, target_galaxy.gas = opt_stars, opt_gas
+    
+    tau_v = target_galaxy.get_stellar_los_tau_v(kappa=mod['kappa'], kernel=Kernel(name="cubic", binsize=1000).get_kernel(), nthreads=opt['nthreads_tau_v'])
+    spectra_dict = target_galaxy.stars.get_particle_spectra(model, tau_v=tau_v, nthreads=opt['nthreads_spectra'])
+    
+    target_galaxy.stars, target_galaxy.gas = original_stars, original_gas
+    particle_spectra = spectra_dict.get('attenuated', list(spectra_dict.values())[0]) if isinstance(spectra_dict, dict) else spectra_dict
 
-        # Photometry
-        print("Calculating photometry...", flush=True)
-        nu_rest = particle_spectra.nu.to('Hz').value
-        lnu_rest = particle_spectra.lnu.to('erg/s/Hz').value
-        t_rest = np.interp(
-            particle_spectra.lam.to(Angstrom).value * (1 + z_obs),
-            vis_filter.lam.to(Angstrom).value,
-            vis_filter.transmission,
-            left=0, right=0
-        )
-        
-        luminosity_in_band = np.abs(np.trapezoid(lnu_rest * t_rest, x=nu_rest, axis=-1))
-        flux_in_band = (luminosity_in_band * star_weight_scale) / (4 * np.pi * d_lum.value**2)
-        
-        # Imaging
-        print("Generating image...", flush=True)
-        coords_for_img = opt_stars.coordinates
-        if opt_stars.centre is not None:
-            coords_for_img -= opt_stars.centre
-            
-        x = coords_for_img[:, 0].to(kpc).value
-        y = coords_for_img[:, 1].to(kpc).value
-        
-        hist, _, _ = np.histogram2d(
-            x, y, bins=resolution, 
-            range=[[-fov_kpc/2, fov_kpc/2], [-fov_kpc/2, fov_kpc/2]],
-            weights=flux_in_band
-        )
-        
-        pixel_size = (fov_kpc / resolution) * kpc
-        img = Image(img=hist, fov=fov_kpc*kpc, resolution=pixel_size)
+    # 2. Imaging
+    nu_rest = particle_spectra.nu.to('Hz').value
+    lnu_rest = particle_spectra.lnu.to('erg/s/Hz').value
+    t_rest = np.interp(particle_spectra.lam.to(Angstrom).value * (1 + z_obs), vis_filter.lam.to(Angstrom).value, vis_filter.transmission, left=0, right=0)
+    flux_in_band = (np.abs(np.trapezoid(lnu_rest * t_rest, x=nu_rest, axis=-1)) * star_weight_scale) / (4 * np.pi * d_lum.value**2)
+    
+    coords_for_img = opt_stars.coordinates - (opt_stars.centre if opt_stars.centre is not None else 0)
+    hist, _, _ = np.histogram2d(coords_for_img[:, 0].to(kpc).value, coords_for_img[:, 1].to(kpc).value, bins=resolution, range=[[-fov_kpc/2, fov_kpc/2], [-fov_kpc/2, fov_kpc/2]], weights=flux_in_band)
+    
+    # Save Euclid
+    euclid_dir = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", "Euclid")
+    os.makedirs(euclid_dir, exist_ok=True)
+    
+    # Raw Image
+    fits.PrimaryHDU(hist).writeto(os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}_raw.fits"), overwrite=True)
+    
+    # Convolved Image
+    sigma_pixels = (obs['fwhm_arcsec'] / 2.355) / pixel_scale_arcsec
+    img_convolved = gaussian_filter(hist, sigma=sigma_pixels)
+    hdu = fits.PrimaryHDU(img_convolved)
+    hdu.header['OBJECT'] = f"Subhalo {subhalo_id}"
+    hdu.header['REDSHIFT'] = z_obs
+    hdu.header['SUBHALO'] = subhalo_id
+    hdu.writeto(os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}.fits"), overwrite=True)
 
-        # DESI Mock Spectra Generation
-        if config.get('desi', {}).get('enabled', False):
-            print("Generating realistic DESI mock spectrum...", flush=True)
-            desi_conf = config['desi']
-            fiber_radius_arcsec = desi_conf['fiber_diameter_arcsec'] / 2.0
-            
-            # Calculate angular distance from center
-            r_kpc = np.sqrt(x**2 + y**2)
-            r_arcsec = r_kpc / scale_kpc_per_arcsec
-            
-            # Select stars within fiber
-            fiber_mask = r_arcsec <= fiber_radius_arcsec
-            n_fiber = np.sum(fiber_mask)
-            print(f"Stars in DESI fiber: {n_fiber}", flush=True)
-            
-            if n_fiber > 0:
-                # 1. Sum spectra of stars in fiber
-                lnu_fiber_total = np.sum(particle_spectra.lnu[fiber_mask], axis=0)
-                lnu_fiber_total *= star_weight_scale
-                
-                # 2. Convert to Flux (erg/s/cm^2/Hz)
-                fnu_fiber = lnu_fiber_total / (4 * np.pi * d_lum**2)
-                lam_obs = particle_spectra.lam.to(Angstrom).value
-                fnu_val = fnu_fiber.to('erg/s/cm**2/Hz').value
-
-                # 3. Define DESI wavelength grid
-                lam_desi = np.arange(desi_conf['lam_min'], desi_conf['lam_max'] + desi_conf['d_lam'], desi_conf['d_lam'])
-                
-                # 4. Apply wavelength-dependent resolution convolution
-                # R(lam) = R_min + (R_max - R_min) * (lam - lam_min) / (lam_max - lam_min)
-                # sigma_lam = lam / (2.355 * R)
-                # We do this on the original grid first, then resample
-                R_lam = desi_conf['R_min'] + (desi_conf['R_max'] - desi_conf['R_min']) * \
-                        (lam_obs - desi_conf['lam_min']) / (desi_conf['lam_max'] - desi_conf['lam_min'])
-                R_lam = np.clip(R_lam, desi_conf['R_min'], desi_conf['R_max'])
-                
-                sigma_lam = lam_obs / (2.355 * R_lam)
-                
-                # Since sigma_lam varies slowly, we can use a variable-width Gaussian convolution
-                # For efficiency on a large grid, we'll interpolate to the DESI grid first
-                # and then apply a mean sigma if the variation is small, or do it properly.
-                # Here we'll do a proper convolution by iterating over a few chunks if needed,
-                # but for 0.1A grid, a simple loop or scipy.ndimage.gaussian_filter1d with constant sigma 
-                # is often "good enough" if the variation is small. 
-                # Let's do a slightly better approach:
-                fnu_interp_func = interp1d(lam_obs, fnu_val, bounds_error=False, fill_value=0.0)
-                fnu_desi_raw = fnu_interp_func(lam_desi)
-                
-                # Calculate sigma in pixels on the DESI grid
-                R_desi = desi_conf['R_min'] + (desi_conf['R_max'] - desi_conf['R_min']) * \
-                         (lam_desi - desi_conf['lam_min']) / (desi_conf['lam_max'] - desi_conf['lam_min'])
-                sigma_pixels = (lam_desi / (2.355 * R_desi)) / desi_conf['d_lam']
-                
-                # Apply convolution. Since sigma varies, we'll use a trick or just a mean sigma
-                # for this specific mock (variation is ~10%).
-                mean_sigma = np.mean(sigma_pixels)
-                fnu_desi_convolved = gaussian_filter1d(fnu_desi_raw, sigma=mean_sigma)
-                
-                # 5. Save DESI Spectrum
-                desi_out = os.path.join(paths['output_path'], desi_conf['output_name'])
-                
-                col1 = fits.Column(name='wavelength', format='E', array=lam_desi)
-                col2 = fits.Column(name='flux', format='E', array=fnu_desi_convolved)
-                cols = fits.ColDefs([col1, col2])
-                hdu_desi = fits.BinTableHDU.from_columns(cols)
-                
-                hdu_desi.header['OBJECT'] = target_galaxy.name
-                hdu_desi.header['REDSHIFT'] = z_obs
-                hdu_desi.header['FIBER_D'] = (desi_conf['fiber_diameter_arcsec'], 'arcsec')
-                hdu_desi.header['R_MIN'] = desi_conf['R_min']
-                hdu_desi.header['R_MAX'] = desi_conf['R_max']
-                hdu_desi.header['UNITS_W'] = 'Angstrom'
-                hdu_desi.header['UNITS_F'] = 'erg/s/cm^2/Hz'
-                
-                hdu_desi.writeto(desi_out, overwrite=True)
-                print(f"Realistic DESI spectrum saved to {desi_out}", flush=True)
-            else:
-                print("No stars found in DESI fiber aperture.", flush=True)
-
-        # PSF
-        sigma_pixels = (obs['fwhm_arcsec'] / 2.355) / pixel_scale_arcsec
-        img_smoothed = gaussian_filter(img.arr, sigma=sigma_pixels)
+    # 3. DESI
+    if desi_conf.get('enabled', False):
+        r_arcsec = np.sqrt(coords_for_img[:, 0].to(kpc).value**2 + coords_for_img[:, 1].to(kpc).value**2) / scale_kpc_per_arcsec
+        mask = r_arcsec <= (desi_conf['fiber_diameter_arcsec'] / 2.0)
         
-        # Save
-        if not os.path.exists(paths['output_path']):
-            os.makedirs(paths['output_path'], exist_ok=True)
+        if np.sum(mask) > 0:
+            lnu_fiber = np.sum(particle_spectra.lnu[mask], axis=0) * star_weight_scale
+            fnu_fiber = (lnu_fiber / (4 * np.pi * d_lum**2)).to('erg/s/cm**2/Hz').value
+            lam_obs = particle_spectra.lam.to(Angstrom).value
             
-        out_file = os.path.join(paths['output_path'], 'euclid_vis_galaxy.fits')
-        hdu = fits.PrimaryHDU(img_smoothed)
-        hdu.header['OBJECT'] = target_galaxy.name
-        hdu.header['REDSHIFT'] = z_obs
-        hdu.header['PIXSCALE'] = (pixel_scale_arcsec, 'arcsec/pixel')
-        hdu.writeto(out_file, overwrite=True)
-        print(f"Done! Saved to {out_file}", flush=True)
+            # Save DESI
+            desi_dir = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", "DESI")
+            os.makedirs(desi_dir, exist_ok=True)
+            
+            # Raw Spectrum
+            cols_raw = [fits.Column(name='wavelength', format='E', array=lam_obs), fits.Column(name='flux', format='E', array=fnu_fiber)]
+            fits.BinTableHDU.from_columns(fits.ColDefs(cols_raw)).writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}_raw.fits"), overwrite=True)
+            
+            # Convolved and Resampled
+            lam_desi = np.arange(desi_conf['lam_min'], desi_conf['lam_max'] + desi_conf['d_lam'], desi_conf['d_lam'])
+            fnu_interp = interp1d(lam_obs, fnu_fiber, bounds_error=False, fill_value=0.0)(lam_desi)
+            R_desi = desi_conf['R_min'] + (desi_conf['R_max'] - desi_conf['R_min']) * (lam_desi - desi_conf['lam_min']) / (desi_conf['lam_max'] - desi_conf['lam_min'])
+            fnu_conv = gaussian_filter1d(fnu_interp, sigma=np.mean((lam_desi / (2.355 * R_desi)) / desi_conf['d_lam']))
+            
+            cols_conv = [fits.Column(name='wavelength', format='E', array=lam_desi), fits.Column(name='flux', format='E', array=fnu_conv)]
+            hdu_desi = fits.BinTableHDU.from_columns(fits.ColDefs(cols_conv))
+            hdu_desi.header['REDSHIFT'] = z_obs
+            hdu_desi.header['SUBHALO'] = subhalo_id
+            hdu_desi.writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}.fits"), overwrite=True)
+
+def generate_euclid_vis_image(config):
+    paths, sim = config['paths'], config['simulation']
+    
+    print(f"Loading TNG data for snap {sim['snap_number']}...", flush=True)
+    limit = sim.get('stellar_mass_limit', 1e10)
+    subhalo_ids = sim.get('subhalo_ids')
+    
+    galaxies, subhalo_mask = load_IllustrisTNG(
+        directory=paths['tng_path'], snap_number=sim['snap_number'], 
+        stellar_mass_limit=limit if not subhalo_ids else 8.5e6, # fallback if ids provided
+        subhalo_ids=subhalo_ids, verbose=True
+    )
+
+    if not galaxies:
+        print("No galaxies found!"); return
+
+    # Load shared resources
+    print("Loading shared resources (grid, filter, model)...", flush=True)
+    grid = Grid(sim['grid_name'], grid_dir=paths['grid_dir'])
+    
+    vis_filter = None
+    local_filter = os.path.join(paths['grid_dir'], paths.get('filter_file', 'Euclid_VIS.vis.dat'))
+    if os.path.exists(local_filter):
+        vis_filter = Filter("Euclid/VIS_local", transmission=np.loadtxt(local_filter)[:, 1], new_lam=np.loadtxt(local_filter)[:, 0] * Angstrom)
+        vis_filter._interpolate_wavelength(grid.lam)
+    else:
+        vis_filter = FilterCollection(filter_codes=["Euclid/VIS.vis"], new_lam=grid.lam)[0]
+
+    model = AttenuatedEmission(grid=grid, dust_curve=Calzetti2000(), apply_to=ReprocessedEmission(grid=grid), emitter="stellar")
+    
+    # Get the actual subhalo IDs from the mask
+    all_subhalo_indices = np.where(subhalo_mask)[0]
+    
+    print(f"Starting batch processing of {len(galaxies)} galaxies...", flush=True)
+    for i, galaxy in enumerate(galaxies):
+        subhalo_id = all_subhalo_indices[i]
+        try:
+            process_galaxy(galaxy, subhalo_id, grid, vis_filter, model, config)
+        except Exception as e:
+            print(f"ERROR: Failed to process subhalo {subhalo_id}: {e}")
 
 if __name__ == "__main__":
     config = load_config()

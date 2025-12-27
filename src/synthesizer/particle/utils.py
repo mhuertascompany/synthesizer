@@ -59,6 +59,9 @@ def rotate(
         # Combined rotation matrix
         rot_matrix = np.dot(rot_matrix_y, rot_matrix_z)
 
+    if coordinates is None:
+        return None
+
     return np.dot(coordinates, rot_matrix.T)
 
 

@@ -1078,7 +1078,8 @@ class Particles:
         if inplace:
             # Rotate the coordinates
             self.coordinates = rotate(self.coordinates, phi, theta, rot_matrix)
-            self.velocities = rotate(self.velocities, phi, theta, rot_matrix)
+            if self.velocities is not None:
+                self.velocities = rotate(self.velocities, phi, theta, rot_matrix)
             if self.centre is not None:
                 self.centre = rotate(self.centre, phi, theta, rot_matrix)
 
@@ -1091,9 +1092,10 @@ class Particles:
         new_parts.coordinates = rotate(
             new_parts.coordinates, phi, theta, rot_matrix
         )
-        new_parts.velocities = rotate(
-            new_parts.velocities, phi, theta, rot_matrix
-        )
+        if new_parts.velocities is not None:
+            new_parts.velocities = rotate(
+                new_parts.velocities, phi, theta, rot_matrix
+            )
         if self.centre is not None:
             new_parts.centre = rotate(new_parts.centre, phi, theta, rot_matrix)
 

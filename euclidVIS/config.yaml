@@ -8,8 +8,11 @@ paths:
 
 simulation:
   snap_number: 99
-  subhalo_ids: [0]
-  grid_name: "bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps"
+  stellar_mass_limit: 1.0e10 # Msun
+  batch: false # Process all galaxies above limit if true
+  subhalo_ids: [0] # Used if batch is false or specific IDs are needed
+  grid_name: "bc03-2016-stelib_chabrier_nebular-Inoue14"
+,100_cloudy-c23.01-sps"
 
 observation:
   z_obs: null # If null, use galaxy redshift. If < 0.001, defaults to 0.05

@@ -100,13 +100,7 @@ def load_config():
     return config
 
 def safe_rotate(component, phi=None, theta=None, proj_type='manual'):
-    """Safelysource /u/mhuertas/python/envs/synth/bin/activate
-
-# Add local synthesizer to path to pick up bugfixes
-export PYTHONPATH=/vera/u/mhuertas/python/synthesizer/src:$PYTHONPATH
-
-# Run the program
-e velocities are None."""
+    """Safely rotate a particle component, handling cases where velocities are None."""
     if component is None:
         return
 
@@ -126,7 +120,8 @@ e velocities are None."""
         # then set them back to None after rotation.
         vels_none = component.velocities is None
         if vels_none:
-            component.velocities = np.zeros_like(component.coordinates)
+            # Create zeros with correct velocity units (km/s)
+            component.velocities = unyt_array(np.zeros_like(component.coordinates.value), units=km/s)
         
         component.rotate_particles(phi=phi, theta=theta)
         

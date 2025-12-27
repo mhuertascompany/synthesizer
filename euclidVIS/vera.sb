@@ -24,7 +24,7 @@ export OPENBLAS_NUM_THREADS=72
 source /u/mhuertas/python/envs/synth/bin/activate
 
 # Add local synthesizer to path to pick up bugfixes
-export PYTHONPATH=/u/mhuertas/python/synthesizer/src:$PYTHONPATH
+#export PYTHONPATH=/u/mhuertas/python/synthesizer/src:$PYTHONPATH
 
 # Run the program
-srun python3 ./generate_euclid_vis.py
+python3 ./generate_euclid_vis.py 

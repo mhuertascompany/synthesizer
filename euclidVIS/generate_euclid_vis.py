@@ -316,7 +316,7 @@ def generate_euclid_vis_image(config):
     paths, sim = config['paths'], config['simulation']
     
     print(f"Loading TNG data for snap {sim['snap_number']}...", flush=True)
-    limit = sim.get('stellar_mass_limit', 1e10)
+    limit = float(sim.get('stellar_mass_limit', 1e10))
     subhalo_ids = sim.get('subhalo_ids')
     if sim.get('batch', False):
         subhalo_ids = None # Ignore specific IDs if batch mode is on

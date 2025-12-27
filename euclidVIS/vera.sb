@@ -6,7 +6,7 @@
 #SBATCH -o /u/mhuertas/data/synthesizer/logs/out.%j
 #SBATCH -e /u/mhuertas/data/synthesizer/logs/err.%j
 #SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
-#SBATCH -p p.standard      # Use standard partition for full node
+#SBATCH -p p.vera          # Use default partition for exclusive node access
 #SBATCH --ntasks=1         # One task (the python script)
 #SBATCH --cpus-per-task=72 # Use 72 cores (full node)
 #SBATCH --mem=256000MB     # 256GB for full snapshot

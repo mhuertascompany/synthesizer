@@ -16,8 +16,30 @@ from synthesizer.particle.stars import Stars
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from scipy.interpolate import interp1d
 from astropy.io import fits
-from astropy.cosmology import Planck15 as cosmo
 import astropy.units as u
+import illustris_python.snapshot as il_snap
+
+# Monkey-patch illustris_python to handle missing SubfindHsml for stars
+_original_loadSubhalo = il_snap.loadSubhalo
+
+def _robust_loadSubhalo(basePath, snapNum, subhaloID, partType, fields=None):
+    if fields is not None and 'SubfindHsml' in fields and str(partType) in ['stars', '4']:
+        try:
+            return _original_loadSubhalo(basePath, snapNum, subhaloID, partType, fields=fields)
+        except Exception as e:
+            if 'SubfindHsml' in str(e):
+                print(f"  WARNING: SubfindHsml not found for stars in Snap {snapNum}. Using fallback.", flush=True)
+                new_fields = [f for f in fields if f != 'SubfindHsml']
+                res = _original_loadSubhalo(basePath, snapNum, subhaloID, partType, fields=new_fields)
+                if res['count'] > 0:
+                    res['SubfindHsml'] = np.zeros(res['count'], dtype=np.float32)
+                return res
+            raise e
+    return _original_loadSubhalo(basePath, snapNum, subhaloID, partType, fields=fields)
+
+il_snap.loadSubhalo = _robust_loadSubhalo
+
+from synthesizer.particle.utils import calculate_smoothing_lengths
 
 def load_config():
     """Load configuration from YAML and override with command-line arguments."""
@@ -138,6 +160,12 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     proj = config.get('projection', {})
 
     print(f"\nProcessing Subhalo {subhalo_id}...", flush=True)
+
+    # Fallback for missing smoothing lengths
+    if target_galaxy.stars is not None:
+        if target_galaxy.stars.smoothing_lengths is None or np.all(target_galaxy.stars.smoothing_lengths.value == 0):
+            print("  Calculating missing stellar smoothing lengths...", flush=True)
+            target_galaxy.stars.smoothing_lengths = calculate_smoothing_lengths(target_galaxy.stars.coordinates)
 
     # Redshift and Distance Handling
     z_obs = obs.get('z_obs')

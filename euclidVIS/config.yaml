@@ -7,15 +7,15 @@ paths:
   filter_file: "Euclid_VIS.vis.dat" # Looked for in grid_dir
 
 simulation:
-  snap_number: 99
+  snap_number: 95
   stellar_mass_limit: 1.0e10 # Msun
-  batch: false # Process all galaxies above limit if true
+  batch: true # Process all galaxies above limit if true
   subhalo_ids: [0] # Used if batch is false or specific IDs are needed
   grid_name: "bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps"
 
 observation:
   z_obs: null # If null, use galaxy redshift. If < 0.001, defaults to 0.05
-  fov_kpc: 100.0
+  fov_kpc: 50.0
   pixel_scale_arcsec: 0.1
   fwhm_arcsec: 0.16 # PSF FWHM
 
@@ -25,7 +25,7 @@ model:
   dust_curve: "Calzetti2000"
 
 optimization:
-  particle_limit: 100000 # Set to null or -1 to disable limit (use all particles)
+  particle_limit: -1 # Set to null or -1 to disable limit (use all particles)
   nthreads_spectra: 8
   nthreads_tau_v: -1
 

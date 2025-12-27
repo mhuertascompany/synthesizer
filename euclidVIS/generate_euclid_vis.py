@@ -234,8 +234,9 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     original_stars, original_gas = target_galaxy.stars, target_galaxy.gas
     target_galaxy.stars, target_galaxy.gas = opt_stars, opt_gas
     
-    tau_v = target_galaxy.get_stellar_los_tau_v(kappa=mod['kappa'], kernel=Kernel(name="cubic", binsize=1000).get_kernel(), nthreads=opt['nthreads_tau_v'])
+    print(f"  Calculating spectra (nthreads={opt['nthreads_spectra']})...", flush=True)
     spectra_dict = target_galaxy.stars.get_particle_spectra(model, tau_v=tau_v, nthreads=opt['nthreads_spectra'])
+    print("  Spectra calculation complete.", flush=True)
     
     target_galaxy.stars, target_galaxy.gas = original_stars, original_gas
     particle_spectra = spectra_dict.get('attenuated', list(spectra_dict.values())[0]) if isinstance(spectra_dict, dict) else spectra_dict
@@ -264,6 +265,7 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     hdu.header['REDSHIFT'] = z_obs
     hdu.header['SUBHALO'] = subhalo_id
     hdu.writeto(os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}.fits"), overwrite=True)
+    print(f"  Euclid images saved to {euclid_dir}", flush=True)
 
     # 3. DESI
     if desi_conf.get('enabled', False):
@@ -294,6 +296,7 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             hdu_desi.header['REDSHIFT'] = z_obs
             hdu_desi.header['SUBHALO'] = subhalo_id
             hdu_desi.writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}.fits"), overwrite=True)
+            print(f"  DESI spectra saved to {desi_dir}", flush=True)
 
 def generate_euclid_vis_image(config):
     paths, sim = config['paths'], config['simulation']
@@ -339,3 +342,4 @@ def generate_euclid_vis_image(config):
 if __name__ == "__main__":
     config = load_config()
     generate_euclid_vis_image(config)
+    print("\nSUCCESS: All galaxies in the snapshot have been processed.", flush=True)

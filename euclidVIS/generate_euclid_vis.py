@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import os
 import yaml
 import argparse
-from unyt import Myr, kpc, arcsec, Angstrom, Msun, pc, km, s, unyt_quantity, unyt_array
+from unyt import Myr, kpc, arcsec, Angstrom, Msun, pc, km, s, unyt_quantity, unyt_array, rad
 from synthesizer.load_data.load_illustris import load_IllustrisTNG
 from synthesizer.grid import Grid
 from synthesizer.imaging import Image
@@ -51,6 +51,11 @@ def load_config():
     parser.add_argument('--no-desi', action='store_false', dest='desi', help='Disable DESI mock spectra generation')
     parser.set_defaults(desi=None)
     
+    # Projection
+    parser.add_argument('--projection_type', type=str, choices=['random', 'face-on', 'edge-on', 'manual'], help='Type of projection')
+    parser.add_argument('--phi', type=float, help='Rotation angle phi (rad)')
+    parser.add_argument('--theta', type=float, help='Rotation angle theta (rad)')
+    
     args = parser.parse_args()
     
     # Load YAML config
@@ -78,6 +83,10 @@ def load_config():
     if args.particle_limit: config['optimization']['particle_limit'] = args.particle_limit
     if args.nthreads: config['optimization']['nthreads_spectra'] = args.nthreads
     if args.desi is not None: config['desi']['enabled'] = args.desi
+    
+    if args.projection_type: config['projection']['type'] = args.projection_type
+    if args.phi is not None: config['projection']['phi'] = args.phi
+    if args.theta is not None: config['projection']['theta'] = args.theta
     
     return config
 
@@ -118,6 +127,32 @@ def generate_euclid_vis_image(config):
     
     print(f"Observation Redshift: {z_obs}", flush=True)
     print(f"Scale: {scale_kpc_per_arcsec:.3f} kpc/arcsec", flush=True)
+
+    # 1. Coordinate Projections and Rotation
+    proj = config.get('projection', {})
+    proj_type = proj.get('type', 'manual')
+    
+    if proj_type == 'random':
+        phi = np.random.uniform(0, 2 * np.pi)
+        theta = np.random.uniform(0, np.pi)
+        print(f"Applying random projection: phi={phi:.3f}, theta={theta:.3f}", flush=True)
+        target_galaxy.stars.rotate_particles(phi=phi*rad, theta=theta*rad)
+        target_galaxy.gas.rotate_particles(phi=phi*rad, theta=theta*rad)
+    elif proj_type == 'face-on':
+        print("Applying face-on projection...", flush=True)
+        target_galaxy.stars.rotate_face_on()
+        target_galaxy.gas.rotate_face_on()
+    elif proj_type == 'edge-on':
+        print("Applying edge-on projection...", flush=True)
+        target_galaxy.stars.rotate_edge_on()
+        target_galaxy.gas.rotate_edge_on()
+    elif proj_type == 'manual':
+        phi = proj.get('phi', 0.0)
+        theta = proj.get('theta', 0.0)
+        if phi != 0 or theta != 0:
+            print(f"Applying manual projection: phi={phi:.3f}, theta={theta:.3f}", flush=True)
+            target_galaxy.stars.rotate_particles(phi=phi*rad, theta=theta*rad)
+            target_galaxy.gas.rotate_particles(phi=phi*rad, theta=theta*rad)
 
     # Load Spectral Grid
     print(f"Loading spectral grid: {sim['grid_name']}...", flush=True)

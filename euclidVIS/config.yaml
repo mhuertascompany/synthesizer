@@ -36,3 +36,8 @@ desi:
   d_lam: 0.1
   R_min: 2000.0
   R_max: 5000.0
+
+projection:
+  type: "random" # "random", "face-on", "edge-on", or "manual"
+  phi: 0.0
+  theta: 0.0

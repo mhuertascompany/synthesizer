@@ -13,7 +13,6 @@
 #SBATCH --time=24:00:00    # 24 hours
 
 module purge
-module load gcc/15 impi/2021.2
 module load anaconda/3/2023.03
 
 # Set number of threads for parallelized synthesizer calls

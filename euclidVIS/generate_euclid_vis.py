@@ -221,7 +221,10 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         gas_coords -= target_galaxy.gas.centre
     gas_fov_mask = (np.abs(gas_coords[:, 0]) < fov_limit + 50*kpc) & (np.abs(gas_coords[:, 1]) < fov_limit + 50*kpc)
     gas_indices = np.where(gas_fov_mask)[0]
-    sampled_gas_indices = np.random.choice(gas_indices, min(len(gas_indices), int(particle_limit)), replace=False)
+    num_to_sample = len(gas_indices)
+    if particle_limit < float('inf'):
+        num_to_sample = min(num_to_sample, int(particle_limit))
+    sampled_gas_indices = np.random.choice(gas_indices, num_to_sample, replace=False)
 
     opt_gas = Gas(
         masses=target_galaxy.gas.masses[sampled_gas_indices],

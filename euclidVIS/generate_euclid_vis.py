@@ -28,6 +28,7 @@ def load_IllustrisTNG_fixed(
     snap_number=99,
     stellar_mass_limit=1e10,
     subhalo_ids=None,
+    max_galaxies=None,
     verbose=True,
     dtm=0.3,
     physical=True,
@@ -57,12 +58,18 @@ def load_IllustrisTNG_fixed(
     subhalo_pos = output["SubhaloPos"][subhalo_mask]
     if verbose: print(f"Loaded {np.sum(subhalo_mask)} galaxies above cut", flush=True)
 
-    galaxies = [None] * np.sum(subhalo_mask)
-    for i, (idx, pos) in tqdm(enumerate(zip(np.where(subhalo_mask)[0], subhalo_pos)), total=np.sum(subhalo_mask), disable=not verbose):
-        galaxies[i] = Galaxy(verbose=False)
-        galaxies[i].redshift = redshift
+    galaxies = []
+    processed_count = 0
+    all_indices = np.where(subhalo_mask)[0]
+    
+    for idx, pos in tqdm(zip(all_indices, subhalo_pos), total=len(all_indices), disable=not verbose):
+        if max_galaxies is not None and processed_count >= max_galaxies:
+            break
+            
+        galaxy = Galaxy(verbose=False)
+        galaxy.redshift = redshift
         if physical: pos *= scale_factor
-        galaxies[i].centre = pos * kpc
+        galaxy.centre = pos * kpc
 
         # Load Stars
         star_fields = ["GFM_StellarFormationTime", "Coordinates", "Masses", "GFM_InitialMass", "GFM_Metallicity", "SubfindHsml"]
@@ -111,6 +118,15 @@ def load_IllustrisTNG_fixed(
         else:
             # print(f"  DEBUG: Subhalo {idx} has NO gas particles in snapshot.", flush=True)
             pass
+
+        galaxies.append(galaxy)
+        processed_count += 1
+
+    # Update subhalo_mask to match the number of galaxies loaded
+    if max_galaxies is not None and len(galaxies) < np.sum(subhalo_mask):
+        new_mask = np.zeros_like(subhalo_mask, dtype=bool)
+        new_mask[all_indices[:len(galaxies)]] = True
+        subhalo_mask = new_mask
 
     return galaxies, subhalo_mask
 
@@ -457,22 +473,13 @@ def generate_euclid_vis_image(config):
     galaxies, subhalo_mask = load_IllustrisTNG_fixed(
         directory=paths['tng_path'], snap_number=sim['snap_number'], 
         stellar_mass_limit=limit,
-        subhalo_ids=subhalo_ids, verbose=True
+        subhalo_ids=subhalo_ids, 
+        max_galaxies=sim.get('max_galaxies'),
+        verbose=True
     )
 
     if not galaxies:
         print("No galaxies found!"); return
-
-    # Limit number of galaxies if requested (for faster debugging)
-    max_gals = sim.get('max_galaxies')
-    if max_gals is not None and max_gals > 0:
-        print(f"DEBUG: Limiting processing to first {max_gals} galaxies.", flush=True)
-        galaxies = galaxies[:max_gals]
-        # Also need to slice the mask to keep IDs consistent
-        all_ids = np.where(subhalo_mask)[0]
-        new_mask = np.zeros_like(subhalo_mask, dtype=bool)
-        new_mask[all_ids[:max_gals]] = True
-        subhalo_mask = new_mask
 
     # Load shared resources
     print("Loading shared resources (grid, filter, model)...", flush=True)

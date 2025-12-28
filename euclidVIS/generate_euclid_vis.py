@@ -387,7 +387,7 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         tau_v = np.zeros(len(opt_stars.initial_masses))
 
     print(f"  Calculating spectra (nthreads={opt['nthreads_spectra']})...", flush=True)
-    spectra_dict = target_galaxy.stars.get_particle_spectra(model=model, tau_v=tau_v, nthreads=opt['nthreads_spectra'])
+    spectra_dict = target_galaxy.stars.get_particle_spectra(emission_model=model, tau_v=tau_v, nthreads=opt['nthreads_spectra'])
     print("  Spectra calculation complete.", flush=True)
     
     target_galaxy.stars, target_galaxy.gas = original_stars, original_gas

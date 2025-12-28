@@ -10,7 +10,7 @@ simulation:
   snap_number: 99
   stellar_mass_limit: 1.0e10 # Msun
   batch: true # Process all galaxies above limit if true
-  max_galaxies: 5 # Set to a small number for debugging, null for full snapshot
+  max_galaxies: null # Set to a small number for debugging, null for full snapshot
   subhalo_ids: [0] # Used if batch is false or specific IDs are needed
   grid_name: "bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps"
 
@@ -29,7 +29,7 @@ model:
   dust_curve: "Calzetti2000"
 
 optimization:
-  particle_limit: 100000 # Set to null or -1 to disable limit (use all particles)
+  particle_limit: -1 # Set to null or -1 to disable limit (use all particles)
   nthreads_spectra: 8
   nthreads_tau_v: -1
 

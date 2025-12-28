@@ -96,7 +96,7 @@ def load_IllustrisTNG_fixed(
             else:
                 _ages = cosmo_astropy.age(1.0 / form_time - 1)
             ages = (universe_age - _ages).value * 1e9  # yr
-            galaxies[i].load_stars(initial_masses=imasses * Msun, ages=ages * yr, metallicities=metallicities, coordinates=coods * kpc, current_masses=masses * Msun, smoothing_lengths=hsml * kpc if hsml is not None else None)
+            galaxy.load_stars(initial_masses=imasses * Msun, ages=ages * yr, metallicities=metallicities, coordinates=coods * kpc, current_masses=masses * Msun, smoothing_lengths=hsml * kpc if hsml is not None else None)
 
         # Load Gas
         gas_fields = ["StarFormationRate", "Coordinates", "Masses", "GFM_Metallicity", "SubfindHsml"]
@@ -112,7 +112,7 @@ def load_IllustrisTNG_fixed(
             if physical:
                 g_coods *= scale_factor
                 g_hsml *= scale_factor
-            galaxies[i].load_gas(coordinates=g_coods * kpc, masses=g_masses * Msun, metallicities=g_metals, star_forming=star_forming, smoothing_lengths=g_hsml * kpc, dust_to_metal_ratio=dtm)
+            galaxy.load_gas(coordinates=g_coods * kpc, masses=g_masses * Msun, metallicities=g_metals, star_forming=star_forming, smoothing_lengths=g_hsml * kpc, dust_to_metal_ratio=dtm)
             # PROPER DEBUG PRINT
             # print(f"  DEBUG: Subhalo {idx} loaded {out_gas['count']} gas particles.", flush=True)
         else:

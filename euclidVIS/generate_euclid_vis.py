@@ -4,7 +4,7 @@ import os
 import yaml
 import argparse
 from unyt import Myr, kpc, arcsec, Angstrom, Msun, pc, km, s, unyt_quantity, unyt_array, rad
-from synthesizer.load_data.load_illustris import load_IllustrisTNG
+# from synthesizer.load_data.load_illustris import load_IllustrisTNG
 from synthesizer.grid import Grid
 from synthesizer.imaging import Image
 from synthesizer.instruments.filters import FilterCollection, Filter
@@ -13,11 +13,106 @@ from synthesizer.emission_models.attenuation import Calzetti2000
 from synthesizer.kernel_functions import Kernel
 from synthesizer.particle.gas import Gas
 from synthesizer.particle.stars import Stars
+from synthesizer.particle.galaxy import Galaxy
+from synthesizer.load_data.utils import age_lookup_table, lookup_age
+import illustris_python as il
+from tqdm import tqdm
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from scipy.interpolate import interp1d
 from astropy.io import fits
 from astropy.cosmology import Planck15 as cosmo
 import astropy.units as u
+
+def load_IllustrisTNG_fixed(
+    directory=".",
+    snap_number=99,
+    stellar_mass_limit=1e10,
+    subhalo_ids=None,
+    verbose=True,
+    dtm=0.3,
+    physical=True,
+    metals=True,
+    age_lookup=True,
+    age_lookup_delta_a=1e-4,
+):
+    """Fixed version of load_IllustrisTNG to handle coordinate scaling and debug gas."""
+    snap_number = int(snap_number)
+    if verbose: print("Loading header information...", flush=True)
+    header = il.groupcat.loadHeader(directory, snap_number)
+    scale_factor = header["Time"].astype(np.float32)
+    redshift = header["Redshift"].astype(np.float32)
+    h = header["HubbleParam"]
+
+    if verbose: print("Loading subhalo catalogue...", flush=True)
+    fields = ["SubhaloMassType", "SubhaloPos"]
+    output = il.groupcat.loadSubhalos(directory, snap_number, fields=fields)
+    stellar_mass = output["SubhaloMassType"][:, 4]
+    
+    if subhalo_ids is not None:
+        subhalo_mask = np.zeros(len(stellar_mass), dtype=bool)
+        subhalo_mask[subhalo_ids] = True
+    else:
+        subhalo_mask = (stellar_mass * 1e10) > float(stellar_mass_limit)
+
+    subhalo_pos = output["SubhaloPos"][subhalo_mask]
+    if verbose: print(f"Loaded {np.sum(subhalo_mask)} galaxies above cut", flush=True)
+
+    galaxies = [None] * np.sum(subhalo_mask)
+    for i, (idx, pos) in tqdm(enumerate(zip(np.where(subhalo_mask)[0], subhalo_pos)), total=np.sum(subhalo_mask), disable=not verbose):
+        galaxies[i] = Galaxy(verbose=False)
+        galaxies[i].redshift = redshift
+        if physical: pos *= scale_factor
+        galaxies[i].centre = pos * kpc
+
+        # Load Stars
+        star_fields = ["GFM_StellarFormationTime", "Coordinates", "Masses", "GFM_InitialMass", "GFM_Metallicity", "SubfindHsml"]
+        if metals: star_fields.append("GFM_Metals")
+        out_stars = il.snapshot.loadSubhalo(directory, snap_number, idx, "stars", fields=star_fields)
+        if out_stars["count"] > 0:
+            mask = out_stars["GFM_StellarFormationTime"] <= 0.0
+            imasses = out_stars["GFM_InitialMass"][~mask]
+            form_time = out_stars["GFM_StellarFormationTime"][~mask]
+            coods = out_stars["Coordinates"][~mask]
+            metallicities = out_stars["GFM_Metallicity"][~mask]
+            masses = out_stars["Masses"][~mask]
+            hsml = out_stars["SubfindHsml"][~mask]
+            masses = (masses * 1e10) / h
+            imasses = (imasses * 1e10) / h
+            if physical:
+                coods *= scale_factor
+                hsml *= scale_factor
+            cosmo_astropy = cosmo
+            universe_age = cosmo_astropy.age(1.0 / scale_factor - 1)
+            if age_lookup:
+                scale_factors, age_grid = age_lookup_table(cosmo_astropy, redshift=redshift, delta_a=age_lookup_delta_a, low_lim=1e-4)
+                _ages = lookup_age(form_time, scale_factors, age_grid)
+            else:
+                _ages = cosmo_astropy.age(1.0 / form_time - 1)
+            ages = (universe_age - _ages).value * 1e9  # yr
+            galaxies[i].load_stars(initial_masses=imasses * Msun, ages=ages * yr, metallicities=metallicities, coordinates=coods * kpc, current_masses=masses * Msun, smoothing_lengths=hsml * kpc if hsml is not None else None)
+
+        # Load Gas
+        gas_fields = ["StarFormationRate", "Coordinates", "Masses", "GFM_Metallicity", "SubfindHsml"]
+        out_gas = il.snapshot.loadSubhalo(directory, snap_number, idx, "gas", fields=gas_fields)
+        if out_gas["count"] > 0:
+            g_masses = out_gas["Masses"]
+            g_sfr = out_gas["StarFormationRate"]
+            g_coods = out_gas["Coordinates"]
+            g_hsml = out_gas["SubfindHsml"]
+            g_metals = out_gas["GFM_Metallicity"]
+            g_masses = (g_masses * 1e10) / h
+            star_forming = g_sfr > 0.0
+            if physical:
+                g_coods *= scale_factor
+                g_hsml *= scale_factor
+            galaxies[i].load_gas(coordinates=g_coods * kpc, masses=g_masses * Msun, metallicities=g_metals, star_forming=star_forming, smoothing_lengths=g_hsml * kpc, dust_to_metal_ratio=dtm)
+            # PROPER DEBUG PRINT
+            # print(f"  DEBUG: Subhalo {idx} loaded {out_gas['count']} gas particles.", flush=True)
+        else:
+            # print(f"  DEBUG: Subhalo {idx} has NO gas particles in snapshot.", flush=True)
+            pass
+
+    return galaxies, subhalo_mask
 
 def load_config():
     """Load configuration from YAML and override with command-line arguments."""
@@ -35,6 +130,7 @@ def load_config():
     parser.add_argument('--snap', type=int, help='TNG snapshot number')
     parser.add_argument('--stellar_mass_limit', type=float, help='Stellar mass limit (Msun)')
     parser.add_argument('--batch', type=bool, help='Enable batch processing')
+    parser.add_argument('--max_galaxies', type=int, help='Max galaxies to process in batch mode')
     parser.add_argument('--subhalo_ids', type=int, nargs='+', help='Subhalo IDs to load')
     parser.add_argument('--grid_name', type=str, help='Spectral grid name')
     
@@ -78,6 +174,7 @@ def load_config():
     if args.snap: config['simulation']['snap_number'] = args.snap
     if args.stellar_mass_limit: config['simulation']['stellar_mass_limit'] = args.stellar_mass_limit
     if args.batch is not None: config['simulation']['batch'] = args.batch
+    if args.max_galaxies: config['simulation']['max_galaxies'] = args.max_galaxies
     if args.subhalo_ids: config['simulation']['subhalo_ids'] = args.subhalo_ids
     if args.grid_name: config['simulation']['grid_name'] = args.grid_name
     if args.z_obs is not None: config['observation']['z_obs'] = args.z_obs
@@ -137,6 +234,11 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     desi_conf = config.get('desi', {})
     proj = config.get('projection', {})
     
+    # Initial check for stellar component
+    if target_galaxy.stars is None:
+        print(f"  ERROR: Subhalo {subhalo_id} has no stars! Skipping.", flush=True)
+        return
+    
     # Get stellar mass for metadata (sum of initial masses)
     stellar_mass = float(np.sum(target_galaxy.stars.initial_masses).to(Msun).value)
 
@@ -185,8 +287,10 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     # Filtering and Downsampling
     particle_limit = opt.get('particle_limit', -1)
     if particle_limit < 0: particle_limit = float('inf')
-    
     fov_limit = fov_kpc / 2 * kpc
+    
+    # 1. Coordinate Projections and Rotation for Stars
+    # clipping to FOV
     star_coords = target_galaxy.stars.coordinates
     if target_galaxy.stars.centre is not None:
         star_coords -= target_galaxy.stars.centre
@@ -212,36 +316,62 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         centre=target_galaxy.stars.centre
     )
 
-    # Gas / Dust
-    if not hasattr(target_galaxy.gas, 'dust_masses'):
-        target_galaxy.gas.dust_masses = target_galaxy.gas.masses * target_galaxy.gas.metallicities * mod['dust_to_metal']
+    # --- ROBUST INITIALIZATION ---
+    tau_v = np.zeros(len(opt_stars.initial_masses)) # Default to no dust
+    opt_gas = None
     
-    gas_coords = target_galaxy.gas.coordinates
-    if target_galaxy.gas.centre is not None:
-        gas_coords -= target_galaxy.gas.centre
-    gas_fov_mask = (np.abs(gas_coords[:, 0]) < fov_limit + 50*kpc) & (np.abs(gas_coords[:, 1]) < fov_limit + 50*kpc)
-    gas_indices = np.where(gas_fov_mask)[0]
-    num_to_sample = len(gas_indices)
-    if particle_limit < float('inf'):
-        num_to_sample = min(num_to_sample, int(particle_limit))
-    sampled_gas_indices = np.random.choice(gas_indices, num_to_sample, replace=False)
-
-    opt_gas = Gas(
-        masses=target_galaxy.gas.masses[sampled_gas_indices],
-        metallicities=target_galaxy.gas.metallicities[sampled_gas_indices],
-        coordinates=target_galaxy.gas.coordinates[sampled_gas_indices],
-        smoothing_lengths=target_galaxy.gas.smoothing_lengths[sampled_gas_indices],
-        dust_masses=target_galaxy.gas.dust_masses[sampled_gas_indices],
-        redshift=target_galaxy.gas.redshift,
-        centre=target_galaxy.gas.centre
-    )
+    # 2. Gas / Dust Processing
+    # Check if gas exists and has particles
+    target_gas = getattr(target_galaxy, 'gas', None)
+    if target_gas is not None and hasattr(target_gas, 'masses') and target_gas.masses is not None and len(target_gas.masses) > 0:
+        
+        if not hasattr(target_gas, 'dust_masses'):
+            target_gas.dust_masses = target_gas.masses * target_gas.metallicities * mod['dust_to_metal']
+        
+        gas_coords = target_gas.coordinates
+        if target_gas.centre is not None:
+            gas_coords -= target_gas.centre
+            
+        gas_fov_mask = (np.abs(gas_coords[:, 0]) < fov_limit + 50*kpc) & (np.abs(gas_coords[:, 1]) < fov_limit + 50*kpc)
+        gas_indices = np.where(gas_fov_mask)[0]
+        
+        num_gas_in_fov = len(gas_indices)
+        if num_gas_in_fov > 0:
+            num_to_sample = num_gas_in_fov
+            if particle_limit < float('inf'):
+                num_to_sample = min(num_to_sample, int(particle_limit))
+            
+            sampled_gas_indices = np.random.choice(gas_indices, num_to_sample, replace=False)
+            opt_gas = Gas(
+                masses=target_gas.masses[sampled_gas_indices],
+                metallicities=target_gas.metallicities[sampled_gas_indices],
+                coordinates=target_gas.coordinates[sampled_gas_indices],
+                smoothing_lengths=target_gas.smoothing_lengths[sampled_gas_indices],
+                dust_masses=target_gas.dust_masses[sampled_gas_indices],
+                redshift=target_gas.redshift,
+                centre=target_gas.centre
+            )
     
-    # Spectra
+    # 3. Calculate Spectra
     original_stars, original_gas = target_galaxy.stars, target_galaxy.gas
     target_galaxy.stars, target_galaxy.gas = opt_stars, opt_gas
     
+    if target_galaxy.gas is not None and len(target_galaxy.gas.masses) > 0:
+        print(f"  Calculating tau_v (nthreads={opt['nthreads_tau_v']})...", flush=True)
+        tau_v = target_galaxy.get_stellar_los_tau_v(
+            kappa=mod['kappa'], 
+            kernel=Kernel(name="cubic", binsize=1000).get_kernel(), 
+            nthreads=opt['nthreads_tau_v']
+        )
+    else:
+        if target_gas is not None and len(target_gas.masses) > 0:
+            print("  INFO: Gas removed by FOV. Dust set to zero.", flush=True)
+        else:
+            print("  INFO: No gas in subhalo. Dust set to zero.", flush=True)
+        tau_v = np.zeros(len(opt_stars.initial_masses))
+
     print(f"  Calculating spectra (nthreads={opt['nthreads_spectra']})...", flush=True)
-    spectra_dict = target_galaxy.stars.get_particle_spectra(model, tau_v=tau_v, nthreads=opt['nthreads_spectra'])
+    spectra_dict = target_galaxy.stars.get_particle_spectra(model=model, tau_v=tau_v, nthreads=opt['nthreads_spectra'])
     print("  Spectra calculation complete.", flush=True)
     
     target_galaxy.stars, target_galaxy.gas = original_stars, original_gas
@@ -324,7 +454,7 @@ def generate_euclid_vis_image(config):
     if sim.get('batch', False):
         subhalo_ids = None # Ignore specific IDs if batch mode is on
     
-    galaxies, subhalo_mask = load_IllustrisTNG(
+    galaxies, subhalo_mask = load_IllustrisTNG_fixed(
         directory=paths['tng_path'], snap_number=sim['snap_number'], 
         stellar_mass_limit=limit,
         subhalo_ids=subhalo_ids, verbose=True
@@ -332,6 +462,17 @@ def generate_euclid_vis_image(config):
 
     if not galaxies:
         print("No galaxies found!"); return
+
+    # Limit number of galaxies if requested (for faster debugging)
+    max_gals = sim.get('max_galaxies')
+    if max_gals is not None and max_gals > 0:
+        print(f"DEBUG: Limiting processing to first {max_gals} galaxies.", flush=True)
+        galaxies = galaxies[:max_gals]
+        # Also need to slice the mask to keep IDs consistent
+        all_ids = np.where(subhalo_mask)[0]
+        new_mask = np.zeros_like(subhalo_mask, dtype=bool)
+        new_mask[all_ids[:max_gals]] = True
+        subhalo_mask = new_mask
 
     # Load shared resources
     print("Loading shared resources (grid, filter, model)...", flush=True)

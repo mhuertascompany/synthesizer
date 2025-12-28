@@ -257,7 +257,6 @@ def load_IllustrisTNG(
 
             # Convert comoving coordinates to physical kpc
             if physical:
-                coods *= scale_factor
                 g_coods *= scale_factor
                 g_hsml *= scale_factor
 

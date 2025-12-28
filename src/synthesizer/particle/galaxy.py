@@ -24,7 +24,11 @@ from unyt import Mpc, Msun, Myr, rad, unyt_quantity
 
 from synthesizer import exceptions
 from synthesizer.base_galaxy import BaseGalaxy
-from synthesizer.extensions.timers import tic, toc
+try:
+    from synthesizer.extensions.timers import tic, toc
+except ImportError:
+    def tic(): return 0
+    def toc(msg, start): pass
 from synthesizer.imaging import Image, SpectralCube
 from synthesizer.parametric.stars import Stars as ParametricStars
 from synthesizer.particle.gas import Gas

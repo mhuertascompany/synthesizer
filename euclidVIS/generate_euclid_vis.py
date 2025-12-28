@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import os
 import yaml
 import argparse
-from unyt import Myr, kpc, arcsec, Angstrom, Msun, pc, km, s, unyt_quantity, unyt_array, rad
+from unyt import Myr, yr, kpc, arcsec, Angstrom, Msun, pc, km, s, unyt_quantity, unyt_array, rad
 # from synthesizer.load_data.load_illustris import load_IllustrisTNG
 from synthesizer.grid import Grid
 from synthesizer.imaging import Image

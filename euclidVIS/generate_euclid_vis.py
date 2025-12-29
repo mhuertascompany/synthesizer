@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import os
 import yaml
 import argparse
+import time
 from unyt import Myr, yr, kpc, arcsec, Angstrom, Msun, pc, km, s, unyt_quantity, unyt_array, rad
 # from synthesizer.load_data.load_illustris import load_IllustrisTNG
 from synthesizer.grid import Grid
@@ -386,32 +387,101 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             print("  INFO: No gas in subhalo. Dust set to zero.", flush=True)
         tau_v = np.zeros(len(opt_stars.initial_masses))
 
-    print(f"  Calculating spectra (nthreads={opt['nthreads_spectra']})...", flush=True)
-    spectra_dict = target_galaxy.stars.get_particle_spectra(emission_model=model, tau_v=tau_v, nthreads=opt['nthreads_spectra'])
-    print("  Spectra calculation complete.", flush=True)
+    # --- 3. Calculate Spectra (Chunked for Memory Efficiency) ---
+    chunk_size = opt.get('chunk_size', 500000)
+    num_stars = len(opt_stars.initial_masses)
     
-    target_galaxy.stars, target_galaxy.gas = original_stars, original_gas
-    particle_spectra = spectra_dict.get('attenuated', list(spectra_dict.values())[0]) if isinstance(spectra_dict, dict) else spectra_dict
-
-    # 2. Imaging
-    nu_rest = particle_spectra.nu.to('Hz').value
-    lnu_rest = particle_spectra.lnu.to('erg/s/Hz').value
-    t_rest = np.interp(particle_spectra.lam.to(Angstrom).value * (1 + z_obs), vis_filter.lam.to(Angstrom).value, vis_filter.transmission, left=0, right=0)
-    flux_in_band = (np.abs(np.trapezoid(lnu_rest * t_rest, x=nu_rest, axis=-1)) * star_weight_scale) / (4 * np.pi * d_lum.value**2)
+    # Aggregators
+    hist_total = np.zeros((resolution, resolution))
+    lnu_fiber_total = None
+    lam_obs = None
     
+    # Pre-calculate global coordinates and fiber mask
     coords_for_img = opt_stars.coordinates - (opt_stars.centre if opt_stars.centre is not None else 0)
-    hist, _, _ = np.histogram2d(coords_for_img[:, 0].to(kpc).value, coords_for_img[:, 1].to(kpc).value, bins=resolution, range=[[-fov_kpc/2, fov_kpc/2], [-fov_kpc/2, fov_kpc/2]], weights=flux_in_band)
+    r_arcsec = np.sqrt(coords_for_img[:, 0].to(kpc).value**2 + coords_for_img[:, 1].to(kpc).value**2) / scale_kpc_per_arcsec
+    desi_mask_global = r_arcsec <= (desi_conf['fiber_diameter_arcsec'] / 2.0) if desi_conf.get('enabled', False) else None
+
+    # Pre-calculate Euclid VIS transmission curve for interpolation
+    # We'll do this once outside the loop
+    # dummy_grid loaded just to get wavelength bins
+    vis_filter_lam = vis_filter.lam.to(Angstrom).value
+    vis_filter_trans = vis_filter.transmission
     
+    # Pre-calculate filter transmission at the spectral grid points (redshifted)
+    # This is constant for all stars in the galaxy
+    lam_rest_grid = grid.lam.to(Angstrom).value
+    t_rest = np.interp(lam_rest_grid * (1 + z_obs), vis_filter_lam, vis_filter_trans, left=0, right=0)
+    
+    print(f"  Calculating spectra in chunks of {chunk_size} (total {num_stars} stars)...", flush=True)
+    
+    for i in range(0, num_stars, chunk_size):
+        end = min(i + chunk_size, num_stars)
+        print(f"    Processing stars {i}-{end}...", flush=True)
+        
+        # Subset stars and tau_v
+        chunk_stars = Stars(
+            initial_masses=opt_stars.initial_masses[i:end],
+            ages=opt_stars.ages[i:end],
+            metallicities=opt_stars.metallicities[i:end],
+            coordinates=opt_stars.coordinates[i:end],
+            current_masses=opt_stars.current_masses[i:end],
+            smoothing_lengths=opt_stars.smoothing_lengths[i:end],
+            velocities=opt_stars.velocities[i:end] if opt_stars.velocities is not None else None,
+            redshift=opt_stars.redshift,
+            centre=opt_stars.centre
+        )
+        chunk_tau_v = tau_v[i:end]
+        
+        # get_particle_spectra for this chunk
+        spectra_dict = chunk_stars.get_particle_spectra(emission_model=model, tau_v=chunk_tau_v, nthreads=opt['nthreads_spectra'], verbose=False)
+        particle_spectra = spectra_dict.get('attenuated', list(spectra_dict.values())[0]) if isinstance(spectra_dict, dict) else spectra_dict
+        
+        # --- Euclid VIS Integration ---
+        nu_rest = particle_spectra.nu.to('Hz').value
+        lnu_rest = particle_spectra.lnu.to('erg/s/Hz').value
+        
+        # Integrate and scale by weights
+        chunk_flux_in_band = (np.abs(np.trapezoid(lnu_rest * t_rest, x=nu_rest, axis=-1)) * star_weight_scale) / (4 * np.pi * d_lum.value**2)
+        
+        # Histogram accumulation
+        chunk_coords = coords_for_img[i:end]
+        hist_chunk, _, _ = np.histogram2d(
+            chunk_coords[:, 0].to(kpc).value, 
+            chunk_coords[:, 1].to(kpc).value, 
+            bins=resolution, 
+            range=[[-fov_kpc/2, fov_kpc/2], [-fov_kpc/2, fov_kpc/2]], 
+            weights=chunk_flux_in_band
+        )
+        hist_total += hist_chunk
+        
+        # --- DESI Fiber Integration ---
+        if desi_mask_global is not None:
+            chunk_desi_mask = desi_mask_global[i:end]
+            if np.sum(chunk_desi_mask) > 0:
+                chunk_lnu_fiber = np.sum(particle_spectra.lnu[chunk_desi_mask], axis=0) * star_weight_scale
+                if lnu_fiber_total is None:
+                    lnu_fiber_total = chunk_lnu_fiber
+                    lam_obs = particle_spectra.lam.to(Angstrom).value * (1 + z_obs)
+                else:
+                    lnu_fiber_total += chunk_lnu_fiber
+        
+        # Clean up chunk to save memory
+        del spectra_dict, particle_spectra, lnu_rest, chunk_stars, chunk_flux_in_band
+        print(f"    Chunk complete. Current progress: {end/num_stars*100:.1f}%. ({time.ctime()})", flush=True)
+    
+    print("  Chunked calculation complete.", flush=True)
+
+    # --- 4. Imaging Output ---
     # Save Euclid
     euclid_dir = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", "Euclid")
     os.makedirs(euclid_dir, exist_ok=True)
     
     # Raw Image
-    fits.PrimaryHDU(hist).writeto(os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}_raw.fits"), overwrite=True)
+    fits.PrimaryHDU(hist_total).writeto(os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}_raw.fits"), overwrite=True)
     
     # Convolved Image
     sigma_pixels = (obs['fwhm_arcsec'] / 2.355) / pixel_scale_arcsec
-    img_convolved = gaussian_filter(hist, sigma=sigma_pixels)
+    img_convolved = gaussian_filter(hist_total, sigma=sigma_pixels)
     hdu = fits.PrimaryHDU(img_convolved)
     hdu.header['OBJECT'] = f"Subhalo {subhalo_id}"
     hdu.header['REDSHIFT'] = z_obs
@@ -420,38 +490,34 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     hdu.writeto(os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}.fits"), overwrite=True)
     print(f"  Euclid images saved to {euclid_dir}", flush=True)
 
-    # 3. DESI
-    if desi_conf.get('enabled', False):
-        r_arcsec = np.sqrt(coords_for_img[:, 0].to(kpc).value**2 + coords_for_img[:, 1].to(kpc).value**2) / scale_kpc_per_arcsec
-        mask = r_arcsec <= (desi_conf['fiber_diameter_arcsec'] / 2.0)
+    # --- 5. DESI Output ---
+    if desi_conf.get('enabled', False) and lnu_fiber_total is not None:
+        fnu_fiber = (lnu_fiber_total / (4 * np.pi * d_lum**2)).to('erg/s/cm**2/Hz').value
         
-        if np.sum(mask) > 0:
-            lnu_fiber = np.sum(particle_spectra.lnu[mask], axis=0) * star_weight_scale
-            fnu_fiber = (lnu_fiber / (4 * np.pi * d_lum**2)).to('erg/s/cm**2/Hz').value
-            # Wavelength is redshifted to the observer frame
-            lam_obs = particle_spectra.lam.to(Angstrom).value * (1 + z_obs)
-            
-            # Save DESI
-            desi_dir = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", "DESI")
-            os.makedirs(desi_dir, exist_ok=True)
-            
-            # Raw Spectrum
-            cols_raw = [fits.Column(name='wavelength', format='E', array=lam_obs), fits.Column(name='flux', format='E', array=fnu_fiber)]
-            fits.BinTableHDU.from_columns(fits.ColDefs(cols_raw)).writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}_raw.fits"), overwrite=True)
-            
-            # Convolved and Resampled
-            lam_desi = np.arange(desi_conf['lam_min'], desi_conf['lam_max'] + desi_conf['d_lam'], desi_conf['d_lam'])
-            fnu_interp = interp1d(lam_obs, fnu_fiber, bounds_error=False, fill_value=0.0)(lam_desi)
-            R_desi = desi_conf['R_min'] + (desi_conf['R_max'] - desi_conf['R_min']) * (lam_desi - desi_conf['lam_min']) / (desi_conf['lam_max'] - desi_conf['lam_min'])
-            fnu_conv = gaussian_filter1d(fnu_interp, sigma=np.mean((lam_desi / (2.355 * R_desi)) / desi_conf['d_lam']))
-            
-            cols_conv = [fits.Column(name='wavelength', format='E', array=lam_desi), fits.Column(name='flux', format='E', array=fnu_conv)]
-            hdu_desi = fits.BinTableHDU.from_columns(fits.ColDefs(cols_conv))
-            hdu_desi.header['REDSHIFT'] = z_obs
-            hdu_desi.header['SUBHALO'] = subhalo_id
-            hdu_desi.header['MASS'] = stellar_mass
-            hdu_desi.writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}.fits"), overwrite=True)
-            print(f"  DESI spectra saved to {desi_dir}", flush=True)
+        # Save DESI
+        desi_dir = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", "DESI")
+        os.makedirs(desi_dir, exist_ok=True)
+        
+        # Raw Spectrum
+        cols_raw = [fits.Column(name='wavelength', format='E', array=lam_obs), fits.Column(name='flux', format='E', array=fnu_fiber)]
+        fits.BinTableHDU.from_columns(fits.ColDefs(cols_raw)).writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}_raw.fits"), overwrite=True)
+        
+        # Convolved and Resampled
+        lam_desi = np.arange(desi_conf['lam_min'], desi_conf['lam_max'] + desi_conf['d_lam'], desi_conf['d_lam'])
+        fnu_interp = interp1d(lam_obs, fnu_fiber, bounds_error=False, fill_value=0.0)(lam_desi)
+        R_desi = desi_conf['R_min'] + (desi_conf['R_max'] - desi_conf['R_min']) * (lam_desi - desi_conf['lam_min']) / (desi_conf['lam_max'] - desi_conf['lam_min'])
+        fnu_conv = gaussian_filter1d(fnu_interp, sigma=np.mean((lam_desi / (2.355 * R_desi)) / desi_conf['d_lam']))
+        
+        cols_conv = [fits.Column(name='wavelength', format='E', array=lam_desi), fits.Column(name='flux', format='E', array=fnu_conv)]
+        hdu_desi = fits.BinTableHDU.from_columns(fits.ColDefs(cols_conv))
+        hdu_desi.header['REDSHIFT'] = z_obs
+        hdu_desi.header['SUBHALO'] = subhalo_id
+        hdu_desi.header['MASS'] = stellar_mass
+        hdu_desi.writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}.fits"), overwrite=True)
+        print(f"  DESI spectra saved to {desi_dir}", flush=True)
+
+    # Revert target_galaxy after processing (optional but cleaner)
+    target_galaxy.stars, target_galaxy.gas = original_stars, original_gas
 
     # 4. Update Catalog
     cat_path = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", "catalog.csv")

@@ -30,6 +30,7 @@ model:
 
 optimization:
   particle_limit: -1 # Set to null or -1 to disable limit (use all particles)
+  chunk_size: 500000 # Number of particles to process at once to avoid OOM
   nthreads_spectra: 8
   nthreads_tau_v: -1
 

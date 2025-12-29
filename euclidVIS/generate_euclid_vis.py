@@ -334,7 +334,9 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     )
 
     # --- ROBUST INITIALIZATION ---
-    tau_v = np.zeros(len(opt_stars.initial_masses)) # Default to no dust
+    chunk_size = opt.get('chunk_size', 500000)
+    num_stars = len(opt_stars.initial_masses)
+    tau_v = np.zeros(num_stars) # Default to no dust
     opt_gas = None
     
     # 2. Gas / Dust Processing
@@ -399,8 +401,7 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             print("  INFO: No gas in subhalo. Dust set to zero.", flush=True)
 
     # --- 3. Calculate Spectra (Chunked for Memory Efficiency) ---
-    chunk_size = opt.get('chunk_size', 500000)
-    num_stars = len(opt_stars.initial_masses)
+    # chunk_size and num_stars already defined above
     
     # Aggregators
     hist_total = np.zeros((resolution, resolution))

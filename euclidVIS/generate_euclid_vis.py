@@ -377,23 +377,12 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     
     tau_v = np.zeros(num_stars)
     if target_galaxy.gas is not None and len(target_galaxy.gas.masses) > 0:
-        print(f"  Calculating tau_v in chunks of {chunk_size} (nthreads={opt['nthreads_tau_v']})...", flush=True)
-        # We chunk tau_v as well to provide progress visibility, 
-        # even if it means rebuilding the gas tree for each chunk.
-        for i in range(0, num_stars, chunk_size):
-            end = min(i + chunk_size, num_stars)
-            print(f"    Calculating tau_v for stars {i}-{end}...", flush=True)
-            chunk_mask = np.zeros(num_stars, dtype=bool)
-            chunk_mask[i:end] = True
-            
-            # get_stellar_los_tau_v returns only the masked values if mask is provided
-            chunk_tau_v_subset = target_galaxy.get_stellar_los_tau_v(
-                kappa=mod['kappa'], 
-                kernel=Kernel(name="cubic", binsize=1000).get_kernel(), 
-                nthreads=opt['nthreads_tau_v'],
-                mask=chunk_mask
-            )
-            tau_v[i:end] = chunk_tau_v_subset
+        print(f"  Calculating tau_v (nthreads={opt['nthreads_tau_v']})...", flush=True)
+        tau_v = target_galaxy.get_stellar_los_tau_v(
+            kappa=mod['kappa'], 
+            kernel=Kernel(name="cubic", binsize=1000).get_kernel(), 
+            nthreads=opt['nthreads_tau_v']
+        )
     else:
         if target_gas is not None and len(target_gas.masses) > 0:
             print("  INFO: Gas removed by FOV. Dust set to zero.", flush=True)

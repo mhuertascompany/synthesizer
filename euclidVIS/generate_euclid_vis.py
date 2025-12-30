@@ -4,6 +4,7 @@ import os
 import yaml
 import argparse
 import time
+import gc
 from unyt import Myr, yr, kpc, arcsec, Angstrom, Msun, pc, km, s, unyt_quantity, unyt_array, rad
 # from synthesizer.load_data.load_illustris import load_IllustrisTNG
 from synthesizer.grid import Grid
@@ -468,6 +469,7 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         
         # Clean up chunk to save memory
         del spectra_dict, particle_spectra, lnu_rest, chunk_stars, chunk_flux_in_band
+        gc.collect()
         print(f"    Chunk complete. Current progress: {end/num_stars*100:.1f}%. ({time.ctime()})", flush=True)
     
     print("  Chunked calculation complete.", flush=True)

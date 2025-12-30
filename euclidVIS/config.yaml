@@ -29,8 +29,8 @@ model:
   dust_curve: "Calzetti2000"
 
 optimization:
-  particle_limit: -1 # Set to null or -1 to disable limit (use all particles)
-  chunk_size: 500000 # Number of particles to process at once to avoid OOM
+  particle_limit: 1000000 # VS: Set to 1M to verify memory safety quickly (10 mins). Set to -1 for PROD.
+  chunk_size: 50000 # Increased to 50k for better performance, still very safe (1/10th of crash size)
   nthreads_spectra: 8
   nthreads_tau_v: -1
 

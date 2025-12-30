@@ -9,8 +9,9 @@ paths:
 simulation:
   snap_number: 99
   stellar_mass_limit: 1.0e10 # Msun
+  max_stellar_mass: 1.0e11 # Skip galaxies larger than this (e.g. Subhalo 0) to speed up run
   batch: true # Process all galaxies above limit if true
-  max_galaxies: 1 # Set to a small number for debugging, null for full snapshot
+  max_galaxies: null # Set to a small number for debugging, null for full snapshot
   subhalo_ids: [0] # Used if batch is false or specific IDs are needed
   grid_name: "bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps"
 
@@ -19,7 +20,7 @@ observation:
   randomize_redshift: true # Assignment random redshift between z_min and z_max
   z_min: 0.0
   z_max: 1.5
-  fov_kpc: 100.0
+  fov_kpc: 50.0
   pixel_scale_arcsec: 0.1
   fwhm_arcsec: 0.16 # PSF FWHM
 
@@ -29,8 +30,8 @@ model:
   dust_curve: "Calzetti2000"
 
 optimization:
-  particle_limit: 1000000 # VS: Set to 1M to verify memory safety quickly (10 mins). Set to -1 for PROD.
-  chunk_size: 50000 # Increased to 50k for better performance, still very safe (1/10th of crash size)
+  particle_limit: -1 # Set to null or -1 to disable limit (use all particles)
+  chunk_size: 100000 # Increased to 100k to speed up processing (halves loop overhead)
   nthreads_spectra: 8
   nthreads_tau_v: -1
 

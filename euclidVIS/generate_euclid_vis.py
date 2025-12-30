@@ -262,6 +262,12 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
 
     print(f"\nProcessing Subhalo {subhalo_id}...", flush=True)
 
+    # Check max mass (to skip monsters like Subhalo 0 if requested)
+    max_mass = float(config['simulation'].get('max_stellar_mass', 1e15))
+    if stellar_mass > max_mass:
+        print(f"  SKIPPING: Stellar mass {stellar_mass:.2e} > limit {max_mass:.2e}", flush=True)
+        return
+
     # Redshift and Distance Handling
     z_obs = obs.get('z_obs')
     if z_obs is None:

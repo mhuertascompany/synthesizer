@@ -31,7 +31,7 @@ model:
 
 optimization:
   particle_limit: -1 # Set to null or -1 to disable limit (use all particles)
-  chunk_size: 100000 # Increased to 100k to speed up processing (halves loop overhead)
+  chunk_size: 10000 # Back to 10k (proven safe). 100k caused OOM.
   nthreads_spectra: 8
   nthreads_tau_v: -1
 

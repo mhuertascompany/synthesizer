@@ -32,8 +32,9 @@ model:
 optimization:
   particle_limit: -1 # Set to null or -1 to disable limit (use all particles)
   chunk_size: 10000 # Back to 10k (proven safe). 100k caused OOM.
-  nthreads_spectra: 8
-  nthreads_tau_v: -1
+  nthreads_spectra: 4 # Reduced for parallel execution (4 threads * 18 workers = 72 cores)
+  nthreads_tau_v: 4 # Reduced for parallel execution
+  n_jobs: 18 # Number of parallel galaxies to process
 
 desi:
   enabled: true

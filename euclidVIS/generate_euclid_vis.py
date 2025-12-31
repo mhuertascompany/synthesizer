@@ -20,6 +20,7 @@ from synthesizer.load_data.utils import age_lookup_table, lookup_age
 import illustris_python as il
 from tqdm import tqdm
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
+from joblib import Parallel, delayed
 from scipy.interpolate import interp1d
 from astropy.io import fits
 from astropy.cosmology import Planck15 as cosmo
@@ -536,27 +537,86 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             f.write("subhalo_id,redshift,stellar_mass\n")
         f.write(f"{subhalo_id},{z_obs:.6f},{stellar_mass:.4e}\n")
 
+def process_single_galaxy_wrapper(subhalo_id, config, grid, vis_filter, model):
+    """Wrapper for processing a single galaxy in a parallel worker."""
+    try:
+        # Check if output already exists (Idempotency)
+        paths = config['paths']
+        snap_number = config['simulation']['snap_number']
+        euclid_dir = os.path.join(paths['output_path'], f"sn{snap_number}", "Euclid")
+        expected_file = os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}.fits")
+        
+        if os.path.exists(expected_file):
+             return f"Subhalo {subhalo_id}: SKIPPING (Output already exists)."
+
+        # Re-load just this galaxy within the worker
+        # We use a dummy list for subhalo_ids to force loading just this one
+        limit = float(config['simulation'].get('stellar_mass_limit', 1e10))
+        paths = config['paths']
+        
+        # Helper to load single galaxy
+        # We reuse load_IllustrisTNG_fixed but restrict it to one ID
+        galaxies, _ = load_IllustrisTNG_fixed(
+            directory=paths['tng_path'], 
+            snap_number=config['simulation']['snap_number'], 
+            stellar_mass_limit=0, # Disable mass limit here as we already filtered IDs
+            subhalo_ids=[subhalo_id], 
+            verbose=False
+        )
+        
+        if not galaxies:
+            return f"Subhalo {subhalo_id}: Failed to load."
+
+        galaxy = galaxies[0]
+        
+        # Randomize redshift if requested (thread-safe random state)
+        obs_conf = config['observation']
+        if obs_conf.get('randomize_redshift', False):
+            z_min, z_max = obs_conf.get('z_min', 0.0), obs_conf.get('z_max', 1.5)
+            # Seed with subhalo_id to be deterministic but different per galaxy
+            np.random.seed(int(subhalo_id) + int(time.time())) 
+            z_rand = float(np.random.uniform(z_min, z_max))
+            obs_conf['z_obs'] = z_rand
+            
+        process_galaxy(galaxy, subhalo_id, grid, vis_filter, model, config)
+        return f"Subhalo {subhalo_id}: Success."
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return f"ERROR: Subhalo {subhalo_id} failed: {e}"
+
 def generate_euclid_vis_image(config):
     paths, sim = config['paths'], config['simulation']
     
-    print(f"Loading TNG data for snap {sim['snap_number']}...", flush=True)
+    print(f"Loading TNG catalog for snap {sim['snap_number']} to identify targets...", flush=True)
+    # Lightweight loading of candidates (metadata only)
     limit = float(sim.get('stellar_mass_limit', 1e10))
-    subhalo_ids = sim.get('subhalo_ids')
-    if sim.get('batch', False):
-        subhalo_ids = None # Ignore specific IDs if batch mode is on
     
-    galaxies, subhalo_mask = load_IllustrisTNG_fixed(
-        directory=paths['tng_path'], snap_number=sim['snap_number'], 
-        stellar_mass_limit=limit,
-        subhalo_ids=subhalo_ids, 
-        max_galaxies=sim.get('max_galaxies'),
-        verbose=True
-    )
+    # Use load_IllustrisTNG_fixed in "metadata only" mode effectively by hacking it? 
+    # Or just use il.groupcat directly here to get IDs.
+    header = il.groupcat.loadHeader(paths['tng_path'], sim['snap_number'])
+    fields = ["SubhaloMassType"]
+    output = il.groupcat.loadSubhalos(paths['tng_path'], sim['snap_number'], fields=fields)
+    stellar_masses = output["SubhaloMassType"][:, 4] * 1e10 / header["HubbleParam"]
+    
+    # Filter candidates
+    candidates = []
+    if sim.get('batch', False):
+         candidates = np.where(stellar_masses > limit)[0]
+    else:
+         candidates = sim.get('subhalo_ids', [0])
+         
+    # Apply max_galaxies debug limit
+    if sim.get('max_galaxies') is not None:
+        candidates = candidates[:int(sim['max_galaxies'])]
+        
+    print(f"Found {len(candidates)} candidate galaxies.", flush=True)
 
-    if not galaxies:
+    if len(candidates) == 0:
         print("No galaxies found!"); return
 
-    # Load shared resources
+    # Load shared resources (Parent Process)
     print("Loading shared resources (grid, filter, model)...", flush=True)
     grid = Grid(sim['grid_name'], grid_dir=paths['grid_dir'])
     
@@ -570,25 +630,18 @@ def generate_euclid_vis_image(config):
 
     model = AttenuatedEmission(grid=grid, dust_curve=Calzetti2000(), apply_to=ReprocessedEmission(grid=grid), emitter="stellar")
     
-    # Get the actual subhalo IDs from the mask
-    all_subhalo_indices = np.where(subhalo_mask)[0]
+    # Parallel Processing
+    n_jobs = config['optimization'].get('n_jobs', 1)
+    print(f"Starting parallel processing with n_jobs={n_jobs}...", flush=True)
     
-    print(f"Starting batch processing of {len(galaxies)} galaxies...", flush=True)
-    obs_conf = config['observation']
-    for i, galaxy in enumerate(galaxies):
-        subhalo_id = all_subhalo_indices[i]
-        
-        # Randomize redshift if requested
-        if obs_conf.get('randomize_redshift', False):
-            z_min, z_max = obs_conf.get('z_min', 0.0), obs_conf.get('z_max', 1.5)
-            z_rand = float(np.random.uniform(z_min, z_max))
-            obs_conf['z_obs'] = z_rand
-            print(f"  [{i+1}/{len(galaxies)}] Subhalo {subhalo_id}: Assigning random redshift z={z_rand:.4f}", flush=True)
-            
-        try:
-            process_galaxy(galaxy, subhalo_id, grid, vis_filter, model, config)
-        except Exception as e:
-            print(f"ERROR: Failed to process subhalo {subhalo_id}: {e}")
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(process_single_galaxy_wrapper)(
+            subhalo_id, config, grid, vis_filter, model
+        ) for subhalo_id in tqdm(candidates)
+    )
+    
+    for res in results:
+        print(res, flush=True)
 
 if __name__ == "__main__":
     config = load_config()

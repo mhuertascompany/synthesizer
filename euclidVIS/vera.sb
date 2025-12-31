@@ -16,10 +16,10 @@ module purge
 module load anaconda/3/2023.03
 
 # Set number of threads for parallelized synthesizer calls
-# We set this to 4 because we run 18 parallel jobs (18 * 4 = 72 cores)
-export OMP_NUM_THREADS=4
-export MKL_NUM_THREADS=4
-export OPENBLAS_NUM_THREADS=4
+# We set this to 8 because we run 9 parallel jobs (9 * 8 = 72 cores)
+export OMP_NUM_THREADS=8
+export MKL_NUM_THREADS=8
+export OPENBLAS_NUM_THREADS=8
 
 # activate virtual environment
 source /u/mhuertas/python/envs/synth/bin/activate

@@ -38,6 +38,7 @@ def load_IllustrisTNG_fixed(
     metals=True,
     age_lookup=True,
     age_lookup_delta_a=1e-4,
+    only_ids=False,
 ):
     """Fixed version of load_IllustrisTNG to handle coordinate scaling and debug gas."""
     snap_number = int(snap_number)
@@ -57,13 +58,16 @@ def load_IllustrisTNG_fixed(
         subhalo_mask[subhalo_ids] = True
     else:
         subhalo_mask = (stellar_mass * 1e10) > float(stellar_mass_limit)
+        
+    all_indices = np.where(subhalo_mask)[0]
+    if only_ids:
+        return all_indices, subhalo_mask
 
     subhalo_pos = output["SubhaloPos"][subhalo_mask]
     if verbose: print(f"Loaded {np.sum(subhalo_mask)} galaxies above cut", flush=True)
 
     galaxies = []
     processed_count = 0
-    all_indices = np.where(subhalo_mask)[0]
     
     for idx, pos in tqdm(zip(all_indices, subhalo_pos), total=len(all_indices), disable=not verbose):
         if max_galaxies is not None and processed_count >= max_galaxies:
@@ -593,19 +597,16 @@ def generate_euclid_vis_image(config):
     # Lightweight loading of candidates (metadata only)
     limit = float(sim.get('stellar_mass_limit', 1e10))
     
-    # Use load_IllustrisTNG_fixed in "metadata only" mode effectively by hacking it? 
-    # Or just use il.groupcat directly here to get IDs.
-    header = il.groupcat.loadHeader(paths['tng_path'], sim['snap_number'])
-    fields = ["SubhaloMassType"]
-    output = il.groupcat.loadSubhalos(paths['tng_path'], sim['snap_number'], fields=fields)
-    stellar_masses = output["SubhaloMassType"][:, 4] * 1e10 / header["HubbleParam"]
     
-    # Filter candidates
-    candidates = []
-    if sim.get('batch', False):
-         candidates = np.where(stellar_masses > limit)[0]
-    else:
-         candidates = sim.get('subhalo_ids', [0])
+    # Filter candidates using the robust loader
+    candidates, _ = load_IllustrisTNG_fixed(
+        directory=paths['tng_path'], 
+        snap_number=sim['snap_number'], 
+        stellar_mass_limit=limit,
+        subhalo_ids=sim.get('subhalo_ids') if not sim.get('batch', False) else None,
+        verbose=True,
+        only_ids=True
+    )
          
     # Apply max_galaxies debug limit
     if sim.get('max_galaxies') is not None:

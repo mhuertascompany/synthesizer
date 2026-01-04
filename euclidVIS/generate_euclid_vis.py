@@ -120,10 +120,11 @@ def load_IllustrisTNG_fixed(
                 g_coods *= scale_factor
                 g_hsml *= scale_factor
             galaxy.load_gas(coordinates=g_coods * kpc, masses=g_masses * Msun, metallicities=g_metals, star_forming=star_forming, smoothing_lengths=g_hsml * kpc, dust_to_metal_ratio=dtm)
-            # PROPER DEBUG PRINT
-            # print(f"  DEBUG: Subhalo {idx} loaded {out_gas['count']} gas particles.", flush=True)
         else:
-            # print(f"  DEBUG: Subhalo {idx} has NO gas particles in snapshot.", flush=True)
+            # Check if catalog says there should be gas
+            cat_gas_mass = (output["SubhaloMassType"][idx, 0] * 1e10) / h
+            if cat_gas_mass > 0:
+                 print(f"  DIAGNOSTIC: Subhalo {idx} has {cat_gas_mass:.1e} Msun gas in catalog but 0 particles in snapshot.", flush=True)
             pass
 
         galaxies.append(galaxy)

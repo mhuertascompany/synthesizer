@@ -11,7 +11,7 @@ def load_simple_config():
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
-def inspect_subhalo(subhalo_id):
+def inspect_subhalo(subhalo_id, z_obs=None):
     config = load_simple_config()
     paths = config['paths']
     snap = config['simulation']['snap_number']
@@ -70,6 +70,11 @@ def inspect_subhalo(subhalo_id):
         print(f"Loaded {len(gal.gas.masses)} gas particles.")
         print(f"Gas Mass (Sum): {np.sum(gal.gas.masses):.2e}")
         
+        # Center Gas Coordinates using Galaxy Centre if available
+        gas_coords = gal.gas.coordinates
+        if gal.centre is not None:
+             gas_coords = gas_coords - gal.centre
+             
         # Check starforming gas
         if hasattr(gal.gas, 'star_forming'):
             sf_gas = gal.gas.masses[gal.gas.star_forming]
@@ -78,9 +83,9 @@ def inspect_subhalo(subhalo_id):
                 print("WARNING: No gas particles are flagged as star-forming!")
         
         # Check coordinates (is gas central or extended?)
-        if len(gal.gas.coordinates) > 0:
-             # coordinates are relative to centre in the loader
-             r = np.sqrt(np.sum(gal.gas.coordinates**2, axis=1)).to('kpc')
+        if len(gas_coords) > 0:
+             # coordinates are relative to centre now
+             r = np.sqrt(np.sum(gas_coords**2, axis=1)).to('kpc')
              print(f"Gas Radius (Mean): {np.mean(r):.2f}")
              print(f"Gas Radius (Min):  {np.min(r):.2f}")
              print(f"Gas Radius (Max):  {np.max(r):.2f}")
@@ -98,12 +103,16 @@ def inspect_subhalo(subhalo_id):
     obs = config['observation']
     # If using randomized redshift, we can't know exactly what the run used without logs
     # But we can approximate using the catalog redshift or z_obs from config
-    z_obs = obs.get('z_obs')
+    
+    # Priority: 1. Argument, 2. Config, 3. Catalog
+    if z_obs is None:
+        z_obs = obs.get('z_obs')
+    
     if z_obs is None:
         z_obs = galaxies[0].redshift
         print(f"Using catalog redshift z={z_obs:.4f}")
     else:
-        print(f"Using config redshift z={z_obs:.4f}")
+        print(f"Using redshift z={z_obs:.4f}")
         
     from astropy.cosmology import Planck15 as cosmo
     scale_kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_obs).value / 60.0
@@ -148,9 +157,12 @@ def inspect_subhalo(subhalo_id):
         print("No stars loaded.")
 
 
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("subhalo_id", type=int, help="ID of the subhalo to inspect")
+    parser.add_argument("--z_obs", type=float, help="Redshift to assume for aperture calculation", default=None)
     args = parser.parse_args()
     
-    inspect_subhalo(args.subhalo_id)
+    inspect_subhalo(args.subhalo_id, z_obs=args.z_obs)

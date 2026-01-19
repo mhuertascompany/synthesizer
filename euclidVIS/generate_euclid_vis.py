@@ -385,7 +385,6 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
                 smoothing_lengths=target_gas.smoothing_lengths[sampled_gas_indices],
                 dust_masses=target_gas.dust_masses[sampled_gas_indices],
                 redshift=target_gas.redshift,
-                redshift=target_gas.redshift,
                 centre=gas_centre
             )
     

@@ -2,10 +2,17 @@ import argparse
 import numpy as np
 import illustris_python as il
 from unyt import Msun, kpc
-from generate_euclid_vis import load_config, load_IllustrisTNG_fixed
+from generate_euclid_vis import load_IllustrisTNG_fixed
+import yaml
+import os
+
+def load_simple_config():
+    config_path = os.path.join(os.path.dirname(__file__), 'config.yaml')
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
 
 def inspect_subhalo(subhalo_id):
-    config = load_config()
+    config = load_simple_config()
     paths = config['paths']
     snap = config['simulation']['snap_number']
     

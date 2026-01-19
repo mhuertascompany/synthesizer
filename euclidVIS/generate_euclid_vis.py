@@ -322,8 +322,10 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     # 1. Coordinate Projections and Rotation for Stars
     # clipping to FOV
     star_coords = target_galaxy.stars.coordinates
-    if target_galaxy.stars.centre is not None:
-        star_coords -= target_galaxy.stars.centre
+    # Robust centering: use star centre if available, else galaxy centre
+    star_centre = target_galaxy.stars.centre if target_galaxy.stars.centre is not None else target_galaxy.centre
+    if star_centre is not None:
+        star_coords = star_coords - star_centre # Explicit new array
     star_fov_mask = (np.abs(star_coords[:, 0]) < fov_limit) & (np.abs(star_coords[:, 1]) < fov_limit)
     star_indices = np.where(star_fov_mask)[0]
     
@@ -343,7 +345,7 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         smoothing_lengths=target_galaxy.stars.smoothing_lengths[sampled_indices],
         velocities=target_galaxy.stars.velocities[sampled_indices] if target_galaxy.stars.velocities is not None else None,
         redshift=target_galaxy.stars.redshift,
-        centre=target_galaxy.stars.centre
+        centre=star_centre
     )
 
     # --- ROBUST INITIALIZATION ---
@@ -361,8 +363,10 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             target_gas.dust_masses = target_gas.masses * target_gas.metallicities * mod['dust_to_metal']
         
         gas_coords = target_gas.coordinates
-        if target_gas.centre is not None:
-            gas_coords -= target_gas.centre
+        # Robust centering
+        gas_centre = target_gas.centre if target_gas.centre is not None else target_galaxy.centre
+        if gas_centre is not None:
+             gas_coords = gas_coords - gas_centre
             
         gas_fov_mask = (np.abs(gas_coords[:, 0]) < fov_limit + 50*kpc) & (np.abs(gas_coords[:, 1]) < fov_limit + 50*kpc)
         gas_indices = np.where(gas_fov_mask)[0]
@@ -381,7 +385,8 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
                 smoothing_lengths=target_gas.smoothing_lengths[sampled_gas_indices],
                 dust_masses=target_gas.dust_masses[sampled_gas_indices],
                 redshift=target_gas.redshift,
-                centre=target_gas.centre
+                redshift=target_gas.redshift,
+                centre=gas_centre
             )
     
     # 3. Calculate Spectra

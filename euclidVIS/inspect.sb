@@ -26,4 +26,4 @@ if [ -z "$1" ]; then
 fi
 
 echo "Running inspection for Subhalo $1..."
-python3 inspect_subhalo.py $1
+python3 inspect_subhalo.py "$@"

@@ -90,8 +90,62 @@ def inspect_subhalo(subhalo_id):
              print(f"  50%: {np.percentile(r, 50):.2f}")
              print(f"  90%: {np.percentile(r, 90):.2f}")
 
+    
+    # 3. Aperture Analysis (DESI Fiber)
+    print("\n--- Aperture Analysis ---")
+    
+    # Needs observation config for redshift/FOV
+    obs = config['observation']
+    # If using randomized redshift, we can't know exactly what the run used without logs
+    # But we can approximate using the catalog redshift or z_obs from config
+    z_obs = obs.get('z_obs')
+    if z_obs is None:
+        z_obs = galaxies[0].redshift
+        print(f"Using catalog redshift z={z_obs:.4f}")
     else:
-        print("WARNING: No gas particles loaded via generate_euclid_vis loader.")
+        print(f"Using config redshift z={z_obs:.4f}")
+        
+    from astropy.cosmology import Planck15 as cosmo
+    scale_kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_obs).value / 60.0
+    
+    fiber_diam_arcsec = config.get('desi', {}).get('fiber_diameter_arcsec', 1.5)
+    fiber_radius_kpc = (fiber_diam_arcsec / 2.0) * scale_kpc_per_arcsec
+    print(f"DESI Fiber Radius: {fiber_radius_kpc:.2f} kpc (at z={z_obs:.4f})")
+    
+    # Check Young Stars in Aperture
+    if gal.stars is not None:
+        # Ages are in yr? Loader says ages=ages*yr
+        # Check units. Synthesizer usually stores them with units.
+        ages = gal.stars.ages
+        masses = gal.stars.launch_masses if hasattr(gal.stars, 'launch_masses') else gal.stars.initial_masses
+        coords = gal.stars.coordinates # These are Absolute? Loader returns Absolute?
+        
+        # Center coordinates!
+        if gal.stars.centre is not None:
+            coords = coords - gal.stars.centre
+            
+        r_stars = np.sqrt(np.sum(coords**2, axis=1)).to('kpc').value
+        
+        # Filter aperture
+        in_fiber = r_stars < fiber_radius_kpc
+        
+        # Filter young stars (e.g. < 10 Myr for H-alpha, < 100 Myr for UV)
+        young_mask = ages.to('Myr').value < 10.0
+        
+        sfr_total_10myr = np.sum(masses[young_mask]) / 1.0e7 # Msun/yr (averaged over 10 Myr)
+        sfr_fiber_10myr = np.sum(masses[young_mask & in_fiber]) / 1.0e7
+        
+        print(f"Total SFR (10 Myr): {sfr_total_10myr:.4f} Msun/yr")
+        print(f"Fiber SFR (10 Myr): {sfr_fiber_10myr:.4f} Msun/yr")
+        print(f"Fraction in Fiber:  {sfr_fiber_10myr/sfr_total_10myr*100:.1f}%")
+        
+        if sfr_fiber_10myr < 1e-3:
+             print("CONCLUSION: Fiber is dead. No emission lines expected.")
+        else:
+             print("CONCLUSION: Fiber has star formation. Emission lines SHOULD be visible.")
+
+    else:
+        print("No stars loaded.")
 
 
 if __name__ == "__main__":

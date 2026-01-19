@@ -1,0 +1,40 @@
+#!/bin/bash -l
+#
+# Verification job script for Subhalo 96768
+#
+#SBATCH -J VERIFY_FIX
+#SBATCH -o /u/mhuertas/data/synthesizer/logs/verify.%j.out
+#SBATCH -e /u/mhuertas/data/synthesizer/logs/verify.%j.err
+#SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=16000MB
+#SBATCH --time=00:20:00
+
+module purge
+module load anaconda/3/2023.03
+
+# activate virtual environment
+source /u/mhuertas/python/envs/synth/bin/activate
+
+# 1. Create a temporary config to disable batch mode
+# We copy the main config and force batch to false so we can pass a single ID
+cp config.yaml config_verify.yaml
+sed -i 's/batch: true/batch: false/' config_verify.yaml
+
+# 2. Clean previous output for this subhalo to force regeneration
+OUTPUT_FILE="/u/mhuertas/data/euclid/tngmocks/sn99/Euclid/euclid_vis_96768.fits"
+if [ -f "$OUTPUT_FILE" ]; then
+    echo "Removing old output file: $OUTPUT_FILE"
+    rm "$OUTPUT_FILE"
+fi
+
+# 3. Run the generation script for 96768 with z=0.3
+# Explicitly passing --z_obs 0.3 as requested
+echo "Running verification for Subhalo 96768 (z=0.3)..."
+python3 generate_euclid_vis.py --config config_verify.yaml --subhalo_ids 96768 --z_obs 0.3
+
+# 4. Cleanup temp config
+rm config_verify.yaml
+echo "Verification job complete."

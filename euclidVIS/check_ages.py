@@ -18,7 +18,7 @@ except ImportError:
     print("ERROR: illustris_python not found. Check environment.")
     sys.exit(1)
 
-print("Starting full spectrum generation (Unmasked/Unrotated to FITS)...", flush=True)
+print("Starting MEMORY-OPTIMIZED full spectrum generation...", flush=True)
 
 with open('config.yaml', 'r') as f:
     config = yaml.safe_load(f)
@@ -49,68 +49,78 @@ if out_stars["count"] > 0:
     form_time = out_stars["GFM_StellarFormationTime"]
     mask_form = form_time > 0.0
     
-    form_time = form_time[mask_form]
-    imasses = (out_stars["GFM_InitialMass"][mask_form] * 1e10) / h
-    metallicities = out_stars["GFM_Metallicity"][mask_form]
-    coods = out_stars["Coordinates"][mask_form] * (scale_factor / h)
+    imasses_all = (out_stars["GFM_InitialMass"][mask_form] * 1e10) / h
+    metallicities_all = out_stars["GFM_Metallicity"][mask_form]
+    coods_all = out_stars["Coordinates"][mask_form] * (scale_factor / h)
     
     subhalo = il.groupcat.loadSingle(directory, snap_number, subhaloID=subhalo_id)
     gal_centre = subhalo['SubhaloPos'] * (scale_factor / h)
-    coods_centered = coods - gal_centre
+    coods_all -= gal_centre
     
-    _ages = cosmo.age(1.0 / form_time - 1)
-    ages_yr = (universe_age - _ages).value * 1e9
+    _ages = cosmo.age(1.0 / form_time[mask_form] - 1)
+    ages_yr_all = (universe_age - _ages).value * 1e9
     
-    print("Generating integrated spectra...", flush=True)
-    galaxy = Galaxy()
-    galaxy.load_stars(
-        initial_masses=imasses * Msun, 
-        ages=ages_yr * yr, 
-        metallicities=metallicities, 
-        coordinates=coods_centered * kpc
-    )
+    num_stars = len(ages_yr_all)
+    print(f"Total stars to process: {num_stars}")
 
+    # Load Grid and TRUNCATE wavelength range to save memory
+    print("Loading and truncating grid (900 - 20000 A)...", flush=True)
     grid = Grid(sim['grid_name'], grid_dir=paths['grid_dir'])
+    grid.reduce_rest_frame_range(900 * Angstrom, 20000 * Angstrom)
     
-    # 1. Intrinsic spectrum (Nebular + Stellar)
-    # This can use the standard get_spectra as no per-particle overriding is needed besides the inherent ones
-    print("  Calculating intrinsic spectrum...", flush=True)
+    n_lam = len(grid.lam)
+    print(f"New number of wavelength bins: {n_lam}")
+
+    # Define Models
     nebular_model = ReprocessedEmission(grid=grid)
-    spec_intrinsic = galaxy.get_spectra(nebular_model)
-    
-    # 2. Attenuated spectrum
-    # We use get_particle_spectra to allow per-particle tau_v application
-    print("  Calculating attenuated spectrum (with per-particle dust)...", flush=True)
     attenuated_model = AttenuatedEmission(grid=grid, dust_curve=Calzetti2000(), apply_to=nebular_model, emitter="stellar")
-    tau_v_const = np.full(len(ages_yr), 0.33) # Charlot & Fall baseline
     
-    try:
-        # Returns a dict of Sed objects (one per particle if use_particle_spectra=True)
-        # In synthesizer 0.1+, get_particle_spectra sets per_particle=True internally
-        dict_att = galaxy.stars.get_particle_spectra(emission_model=attenuated_model, tau_v=tau_v_const)
-        spec_att_parts = dict_att['attenuated']
+    # ACCUMULATORS
+    lnu_int_total = np.zeros(n_lam)
+    lnu_att_total = np.zeros(n_lam)
+    
+    chunk_size = 100000
+    print(f"Processing in chunks of {chunk_size}...", flush=True)
+    
+    for i in range(0, num_stars, chunk_size):
+        end = min(i + chunk_size, num_stars)
+        print(f"  Stars {i} to {end}...", flush=True)
         
-        # Integrate (sum) over the particles if it returned multiple
-        if hasattr(spec_att_parts, 'nsed') and spec_att_parts.nsed > 1:
-            lnu_att = np.sum(spec_att_parts.lnu.to(erg/s/Hz).value, axis=0)
-        else:
-            lnu_att = spec_att_parts.lnu.to(erg/s/Hz).value
-    except Exception as e:
-        print(f"  Attempting fallback for attenuation: {e}")
-        # If the above fails, try to apply constant tau_v to the integrated spectrum
-        # (Though this isn't strictly correct for a population, it's a safe diagnostic fallback)
-        spec_att_fallback = spec_intrinsic.apply_attenuation(tau_v=0.33, dust_curve=Calzetti2000())
-        lnu_att = spec_att_fallback.lnu.to(erg/s/Hz).value
+        chunk_stars = Stars(
+            initial_masses=imasses_all[i:end] * Msun,
+            ages=ages_yr_all[i:end] * yr,
+            metallicities=metallicities_all[i:end],
+            coordinates=coods_all[i:end] * kpc
+        )
+        
+        # 1. Intrinsic
+        spec_int = chunk_stars.get_spectra(nebular_model)
+        lnu_int_total += spec_int.lnu.to(erg/s/Hz).value
+        
+        # 2. Attenuated
+        tau_v_chunk = np.full(end - i, 0.33)
+        # We must use get_spectra on Stellar object to avoid SED mismatch if using per-particle array
+        # actually Stars.get_spectra handles tau_v=[] now in synth 1.0 logic, but let's be safe
+        try:
+            dict_att = chunk_stars.get_particle_spectra(emission_model=attenuated_model, tau_v=tau_v_chunk)
+            spec_att_parts = dict_att['attenuated']
+            if hasattr(spec_att_parts, 'nsed') and spec_att_parts.nsed > 1:
+                lnu_att_total += np.sum(spec_att_parts.lnu.to(erg/s/Hz).value, axis=0)
+            else:
+                lnu_att_total += spec_att_parts.lnu.to(erg/s/Hz).value
+        except Exception as e:
+            print(f"    Chunk fallout: {e}")
+            # Fallback to applying it to the integrated chunk (less correct but works)
+            spec_att_fallback = spec_int.apply_attenuation(tau_v=0.33, dust_curve=Calzetti2000())
+            lnu_att_total += spec_att_fallback.lnu.to(erg/s/Hz).value
 
     # SAVE TO FITS
     output_name = f"subhalo_{subhalo_id}_full_spectrum.fits"
-    
-    lam = spec_intrinsic.lam.to(Angstrom).value
-    lnu_int = spec_intrinsic.lnu.to(erg/s/Hz).value
+    lam = grid.lam.to(Angstrom).value
     
     col1 = fits.Column(name='WAVELENGTH', format='D', array=lam, unit='Angstrom')
-    col2 = fits.Column(name='LNU_INTRINSIC', format='D', array=lnu_int, unit='erg/s/Hz')
-    col3 = fits.Column(name='LNU_ATTENUATED', format='D', array=lnu_att, unit='erg/s/Hz')
+    col2 = fits.Column(name='LNU_INTRINSIC', format='D', array=lnu_int_total, unit='erg/s/Hz')
+    col3 = fits.Column(name='LNU_ATTENUATED', format='D', array=lnu_att_total, unit='erg/s/Hz')
     
     hdu = fits.BinTableHDU.from_columns([col1, col2, col3])
     hdu.header['SUBHALO'] = subhalo_id
@@ -123,10 +133,7 @@ if out_stars["count"] > 0:
     print(f"Full spectrum saved to: {output_name}")
     
     ha_idx = np.argmin(np.abs(lam - 6563.0))
-    hb_idx = np.argmin(np.abs(lam - 4861.0))
-    print(f"H-alpha (6563A) Intrinsic flux: {lnu_int[ha_idx]:.2e}")
-    print(f"H-alpha (6563A) Attenuated flux: {lnu_att[ha_idx]:.2e}")
-    print(f"Intrinsic Ha/Hb ratio: {lnu_int[ha_idx] / lnu_int[hb_idx]:.2f}")
+    print(f"H-alpha (6563A) Intrinsic flux: {lnu_int_total[ha_idx]:.2e}")
 
 else:
     print("No stars found.")

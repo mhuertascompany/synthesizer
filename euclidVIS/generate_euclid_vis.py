@@ -426,7 +426,17 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     # Pre-calculate global coordinates and fiber mask
     coords_for_img = opt_stars.coordinates - (opt_stars.centre if opt_stars.centre is not None else 0)
     r_arcsec = np.sqrt(coords_for_img[:, 0].to(kpc).value**2 + coords_for_img[:, 1].to(kpc).value**2) / scale_kpc_per_arcsec
-    desi_mask_global = r_arcsec <= (desi_conf['fiber_diameter_arcsec'] / 2.0) if desi_conf.get('enabled', False) else None
+    
+    desi_enabled = desi_conf.get('enabled', False)
+    desi_mask_global = r_arcsec <= (desi_conf['fiber_diameter_arcsec'] / 2.0) if desi_enabled else None
+    
+    if desi_enabled:
+        num_in_fiber = np.sum(desi_mask_global)
+        print(f"  DESI DIAGNOSTIC: {num_in_fiber} stars found inside {desi_conf['fiber_diameter_arcsec']}\" fiber.", flush=True)
+        if num_in_fiber > 0:
+            print(f"  DESI DIAGNOSTIC: r_arcsec range: {np.min(r_arcsec[desi_mask_global]):.3f} to {np.max(r_arcsec[desi_mask_global]):.3f}", flush=True)
+        else:
+            print(f"  DESI DIAGNOSTIC: min(r_arcsec) = {np.min(r_arcsec):.3f}", flush=True)
 
     # Pre-calculate Euclid VIS transmission curve for interpolation
     # We'll do this once outside the loop
@@ -440,7 +450,12 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     t_rest = np.interp(lam_rest_grid * (1 + z_obs), vis_filter_lam, vis_filter_trans, left=0, right=0)
     
     print(f"  Calculating spectra in chunks of {chunk_size} (total {num_stars} stars)...", flush=True)
-    
+
+    # --- GLOBAL DIAGNOSTIC: Count all young stars in FOV ---
+    global_young_mask = (opt_stars.ages.to('Myr').value < 10.0)
+    num_global_young = np.sum(global_young_mask)
+    print(f"  GLOBAL DIAGNOSTIC: Found {num_global_young} young stars (<10 Myr) in the FOV.", flush=True)
+
     for i in range(0, num_stars, chunk_size):
         end = min(i + chunk_size, num_stars)
         print(f"    Processing stars {i}-{end}...", flush=True)
@@ -464,22 +479,21 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         particle_spectra = spectra_dict.get('attenuated', list(spectra_dict.values())[0]) if isinstance(spectra_dict, dict) else spectra_dict
         
         # --- DIAGNOSTIC: Check for H-alpha peak in rest-frame ---
-        if i == 0: # Check first chunk
-            young_mask = (chunk_stars.ages.to('Myr').value < 10.0)
-            if np.any(young_mask):
-                # REST FRAME H-alpha is at 6563A
-                ha_mask = (particle_spectra.lam.to(Angstrom).value > 6555) & (particle_spectra.lam.to(Angstrom).value < 6575)
-                if np.any(ha_mask):
-                    idx_young = np.where(young_mask)[0][0] # Check first young star
-                    ha_fluxes = particle_spectra.lnu[idx_young, ha_mask]
-                    cont_fluxes = particle_spectra.lnu[idx_young, ~ha_mask]
-                    max_ha = np.max(ha_fluxes)
-                    mean_cont = np.mean(cont_fluxes)
-                    print(f"      DIAGNOSTIC (Young Star 0): H-alpha max={max_ha:.2e}, Continuum mean={mean_cont:.2e}, Ratio={max_ha/mean_cont:.1f}", flush=True)
-                else:
-                    print("      DIAGNOSTIC: H-alpha wavelength not in grid?!", flush=True)
+        young_mask = (chunk_stars.ages.to('Myr').value < 10.0)
+        if np.any(young_mask):
+            # REST FRAME H-alpha is at 6563A
+            ha_mask = (particle_spectra.lam.to(Angstrom).value > 6555) & (particle_spectra.lam.to(Angstrom).value < 6575)
+            if np.any(ha_mask):
+                idx_young = np.where(young_mask)[0][0] # Check first young star
+                ha_fluxes = particle_spectra.lnu[idx_young, ha_mask]
+                cont_fluxes = particle_spectra.lnu[idx_young, ~ha_mask]
+                max_ha = np.max(ha_fluxes)
+                mean_cont = np.mean(cont_fluxes)
+                print(f"      CHUNK DIAGNOSTIC (Young Star @ star {i + idx_young}): H-alpha max={max_ha:.2e}, Continuum mean={mean_cont:.2e}, Ratio={max_ha/mean_cont:.1f}", flush=True)
             else:
-                print("      DIAGNOSTIC: No young stars in this chunk.", flush=True)
+                # Only print this once if it happens
+                if i == 0:
+                    print("      DIAGNOSTIC: H-alpha wavelength not in grid?!", flush=True)
         
         # --- Euclid VIS Integration ---
         nu_rest = particle_spectra.nu.to('Hz').value
@@ -537,30 +551,35 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     print(f"  Euclid images saved to {euclid_dir}", flush=True)
 
     # --- 5. DESI Output ---
-    if desi_conf.get('enabled', False) and lnu_fiber_total is not None:
-        fnu_fiber = (lnu_fiber_total / (4 * np.pi * d_lum**2)).to('erg/s/cm**2/Hz').value
-        
-        # Save DESI
-        desi_dir = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", "DESI")
-        os.makedirs(desi_dir, exist_ok=True)
-        
-        # Raw Spectrum
-        cols_raw = [fits.Column(name='wavelength', format='E', array=lam_obs), fits.Column(name='flux', format='E', array=fnu_fiber)]
-        fits.BinTableHDU.from_columns(fits.ColDefs(cols_raw)).writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}_raw.fits"), overwrite=True)
-        
-        # Convolved and Resampled
-        lam_desi = np.arange(desi_conf['lam_min'], desi_conf['lam_max'] + desi_conf['d_lam'], desi_conf['d_lam'])
-        fnu_interp = interp1d(lam_obs, fnu_fiber, bounds_error=False, fill_value=0.0)(lam_desi)
-        R_desi = desi_conf['R_min'] + (desi_conf['R_max'] - desi_conf['R_min']) * (lam_desi - desi_conf['lam_min']) / (desi_conf['lam_max'] - desi_conf['lam_min'])
-        fnu_conv = gaussian_filter1d(fnu_interp, sigma=np.mean((lam_desi / (2.355 * R_desi)) / desi_conf['d_lam']))
-        
-        cols_conv = [fits.Column(name='wavelength', format='E', array=lam_desi), fits.Column(name='flux', format='E', array=fnu_conv)]
-        hdu_desi = fits.BinTableHDU.from_columns(fits.ColDefs(cols_conv))
-        hdu_desi.header['REDSHIFT'] = z_obs
-        hdu_desi.header['SUBHALO'] = subhalo_id
-        hdu_desi.header['MASS'] = stellar_mass
-        hdu_desi.writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}.fits"), overwrite=True)
-        print(f"  DESI spectra saved to {desi_dir}", flush=True)
+    if desi_conf.get('enabled', False):
+        if lnu_fiber_total is not None:
+            fnu_fiber = (lnu_fiber_total / (4 * np.pi * d_lum**2)).to('erg/s/cm**2/Hz').value
+            
+            # Save DESI
+            desi_dir = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", "DESI")
+            os.makedirs(desi_dir, exist_ok=True)
+            
+            # Raw Spectrum
+            cols_raw = [fits.Column(name='wavelength', format='E', array=lam_obs), fits.Column(name='flux', format='E', array=fnu_fiber)]
+            fits.BinTableHDU.from_columns(fits.ColDefs(cols_raw)).writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}_raw.fits"), overwrite=True)
+            
+            # Convolved and Resampled
+            lam_desi = np.arange(desi_conf['lam_min'], desi_conf['lam_max'] + desi_conf['d_lam'], desi_conf['d_lam'])
+            fnu_interp = interp1d(lam_obs, fnu_fiber, bounds_error=False, fill_value=0.0)(lam_desi)
+            R_desi = desi_conf['R_min'] + (desi_conf['R_max'] - desi_conf['R_min']) * (lam_desi - desi_conf['lam_min']) / (desi_conf['lam_max'] - desi_conf['lam_min'])
+            fnu_conv = gaussian_filter1d(fnu_interp, sigma=np.mean((lam_desi / (2.355 * R_desi)) / desi_conf['d_lam']))
+            
+            cols_conv = [fits.Column(name='wavelength', format='E', array=lam_desi), fits.Column(name='flux', format='E', array=fnu_conv)]
+            hdu_desi = fits.BinTableHDU.from_columns(fits.ColDefs(cols_conv))
+            hdu_desi.header['REDSHIFT'] = z_obs
+            hdu_desi.header['SUBHALO'] = subhalo_id
+            hdu_desi.header['MASS'] = stellar_mass
+            hdu_desi.writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}.fits"), overwrite=True)
+            print(f"  DESI spectra saved to {desi_dir}", flush=True)
+        else:
+            print("  DESI WARNING: lnu_fiber_total is None! No stars in fiber?", flush=True)
+    else:
+        print("  DESI INFO: DESI generation disabled in config.", flush=True)
 
     # Revert target_galaxy after processing (optional but cleaner)
     target_galaxy.stars, target_galaxy.gas = original_stars, original_gas

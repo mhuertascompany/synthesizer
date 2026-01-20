@@ -1,14 +1,22 @@
-#!/bin/bash
-#SBATCH --job-name=check_ages
-#SBATCH --partition=p.vera
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
+#!/bin/bash -l
+#
+# Diagnostic job script for MPCDF VERA.
+#
+#SBATCH -J CHECK_HA
+#SBATCH -o /u/mhuertas/data/synthesizer/logs/out.%j
+#SBATCH -e /u/mhuertas/data/synthesizer/logs/err.%j
+#SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=8G
+#SBATCH --mem=16G
 #SBATCH --time=00:30:00
-#SBATCH --output=check_ages.out
 
+module purge
 module load anaconda/3/2023.03
+
+# activate virtual environment
 source /u/mhuertas/python/envs/synth/bin/activate
 
-python check_ages.py
+# Run the diagnostic script
+python3 ./check_ages.py 

@@ -205,7 +205,9 @@ def load_config():
     if args.stellar_mass_limit: config['simulation']['stellar_mass_limit'] = args.stellar_mass_limit
     if args.batch is not None: config['simulation']['batch'] = args.batch
     if args.max_galaxies: config['simulation']['max_galaxies'] = args.max_galaxies
-    if args.subhalo_ids: config['simulation']['subhalo_ids'] = args.subhalo_ids
+    if args.subhalo_ids: 
+        config['simulation']['subhalo_ids'] = args.subhalo_ids
+        config['simulation']['batch'] = False
     if args.grid_name: config['simulation']['grid_name'] = args.grid_name
     if args.z_obs is not None: 
         config['observation']['z_obs'] = args.z_obs

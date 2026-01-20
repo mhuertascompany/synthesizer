@@ -20,4 +20,4 @@ source /u/mhuertas/python/envs/synth/bin/activate
 
 # Process only subhalo 96768 with a fixed observation z
 # This is our known test case with young stars in the FOV.
-python3 ./generate_euclid_vis.py --subhalo_ids 96768 --z_obs 0.5
+python3 ./generate_euclid_vis.py --subhalo_ids 96768 --z_obs 0.3

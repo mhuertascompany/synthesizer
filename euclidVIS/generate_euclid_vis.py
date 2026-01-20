@@ -303,10 +303,11 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     if gal_centre is not None:
         print(f"  Centering components (Stars & Gas) to origin...", flush=True)
         if target_galaxy.stars is not None:
-             target_galaxy.stars.coordinates -= gal_centre
+             # Use explicit assignment as -= on Quantity descriptor doesn't work inplace
+             target_galaxy.stars.coordinates = target_galaxy.stars.coordinates - gal_centre
              target_galaxy.stars.centre = unyt_array([0, 0, 0], units='kpc')
         if target_galaxy.gas is not None:
-             target_galaxy.gas.coordinates -= gal_centre
+             target_galaxy.gas.coordinates = target_galaxy.gas.coordinates - gal_centre
              target_galaxy.gas.centre = unyt_array([0, 0, 0], units='kpc')
         target_galaxy.centre = unyt_array([0, 0, 0], units='kpc')
 
@@ -427,8 +428,14 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     lnu_fiber_total = None
     lam_obs = None
     
+    # DIAGNOSTIC: Check coordinate ranges
+    if opt_stars.nparticles > 0:
+        c_min = np.min(opt_stars.coordinates.to(kpc).value, axis=0)
+        c_max = np.max(opt_stars.coordinates.to(kpc).value, axis=0)
+        print(f"  DIAGNOSTIC: Star coordinate range: X=[{c_min[0]:.1f}, {c_max[0]:.1f}], Y=[{c_min[1]:.1f}, {c_max[1]:.1f}] kpc", flush=True)
+
     # Pre-calculate global coordinates and fiber mask
-    coords_for_img = opt_stars.coordinates - (opt_stars.centre if opt_stars.centre is not None else 0)
+    coords_for_img = opt_stars.coordinates
     r_arcsec = np.sqrt(coords_for_img[:, 0].to(kpc).value**2 + coords_for_img[:, 1].to(kpc).value**2) / scale_kpc_per_arcsec
     
     desi_enabled = desi_conf.get('enabled', False)
@@ -476,6 +483,7 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             redshift=opt_stars.redshift,
             centre=opt_stars.centre
         )
+        chunk_stars.parent = target_galaxy
         chunk_tau_v = tau_v[i:end]
         
         # get_particle_spectra for this chunk

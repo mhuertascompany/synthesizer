@@ -1,0 +1,14 @@
+#!/bin/bash -l
+#SBATCH -J GRID_INFO
+#SBATCH -o /u/mhuertas/data/synthesizer/logs/grid_info.%j.out
+#SBATCH -e /u/mhuertas/data/synthesizer/logs/grid_info.%j.err
+#SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=8000MB
+#SBATCH --time=00:05:00
+
+module load anaconda/3/2023.03
+source /u/mhuertas/python/envs/synth/bin/activate
+python3 inspect_grid.py

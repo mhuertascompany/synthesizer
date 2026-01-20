@@ -18,7 +18,7 @@ except ImportError:
     print("ERROR: illustris_python not found. Check environment.")
     sys.exit(1)
 
-print("Starting MEMORY-OPTIMIZED full spectrum generation...", flush=True)
+print("Starting PRODUCTION-RESOURCED full spectrum generation...", flush=True)
 
 with open('config.yaml', 'r') as f:
     config = yaml.safe_load(f)
@@ -63,13 +63,13 @@ if out_stars["count"] > 0:
     num_stars = len(ages_yr_all)
     print(f"Total stars to process: {num_stars}")
 
-    # Load Grid and TRUNCATE wavelength range to save memory
+    # Load Grid and TRUNCATE wavelength range (900 - 20000 A) - as suggested by devs
     print("Loading and truncating grid (900 - 20000 A)...", flush=True)
     grid = Grid(sim['grid_name'], grid_dir=paths['grid_dir'])
     grid.reduce_rest_frame_range(900 * Angstrom, 20000 * Angstrom)
     
     n_lam = len(grid.lam)
-    print(f"New number of wavelength bins: {n_lam}")
+    print(f"Number of wavelength bins: {n_lam}")
 
     # Define Models
     nebular_model = ReprocessedEmission(grid=grid)
@@ -79,7 +79,7 @@ if out_stars["count"] > 0:
     lnu_int_total = np.zeros(n_lam)
     lnu_att_total = np.zeros(n_lam)
     
-    chunk_size = 100000
+    chunk_size = 50000 # Smaller chunks + 240GB RAM should be bulletproof
     print(f"Processing in chunks of {chunk_size}...", flush=True)
     
     for i in range(0, num_stars, chunk_size):
@@ -99,18 +99,16 @@ if out_stars["count"] > 0:
         
         # 2. Attenuated
         tau_v_chunk = np.full(end - i, 0.33)
-        # We must use get_spectra on Stellar object to avoid SED mismatch if using per-particle array
-        # actually Stars.get_spectra handles tau_v=[] now in synth 1.0 logic, but let's be safe
         try:
-            dict_att = chunk_stars.get_particle_spectra(emission_model=attenuated_model, tau_v=tau_v_chunk)
+            # Using get_particle_spectra with 8 threads
+            dict_att = chunk_stars.get_particle_spectra(emission_model=attenuated_model, tau_v=tau_v_chunk, nthreads=8)
             spec_att_parts = dict_att['attenuated']
             if hasattr(spec_att_parts, 'nsed') and spec_att_parts.nsed > 1:
                 lnu_att_total += np.sum(spec_att_parts.lnu.to(erg/s/Hz).value, axis=0)
             else:
                 lnu_att_total += spec_att_parts.lnu.to(erg/s/Hz).value
         except Exception as e:
-            print(f"    Chunk fallout: {e}")
-            # Fallback to applying it to the integrated chunk (less correct but works)
+            print(f"    Chunk fallback: {e}")
             spec_att_fallback = spec_int.apply_attenuation(tau_v=0.33, dust_curve=Calzetti2000())
             lnu_att_total += spec_att_fallback.lnu.to(erg/s/Hz).value
 

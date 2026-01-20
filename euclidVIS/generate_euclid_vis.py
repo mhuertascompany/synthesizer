@@ -184,6 +184,9 @@ def load_config():
     parser.add_argument('--phi', type=float, help='Rotation angle phi (rad)')
     parser.add_argument('--theta', type=float, help='Rotation angle theta (rad)')
     
+    # Overwrite
+    parser.add_argument('--force_overwrite', action='store_true', help='Force overwrite existing outputs')
+    
     args = parser.parse_args()
     
     # Load YAML config
@@ -227,6 +230,9 @@ def load_config():
         config['projection']['type'] = args.projection_type
     if args.phi is not None: config['projection']['phi'] = args.phi
     if args.theta is not None: config['projection']['theta'] = args.theta
+    
+    if args.force_overwrite:
+        config['optimization']['force_overwrite'] = True
     
     return config
 
@@ -615,7 +621,8 @@ def process_single_galaxy_wrapper(subhalo_id, config, grid, vis_filter, model):
         euclid_dir = os.path.join(paths['output_path'], f"sn{snap_number}", "Euclid")
         expected_file = os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}.fits")
         
-        if os.path.exists(expected_file):
+        force = config.get('optimization', {}).get('force_overwrite', False)
+        if os.path.exists(expected_file) and not force:
              return f"Subhalo {subhalo_id}: SKIPPING (Output already exists)."
 
         # Re-load just this galaxy within the worker

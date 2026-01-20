@@ -31,7 +31,7 @@ scale_factor, redshift = header["Time"], header["Redshift"]
 universe_age = cosmo.age(1.0 / scale_factor - 1)
 
 # Center of subhalo from catalog
-subhalo = il.groupcat.loadSingle(directory, snap_number, subhalo_id=subhalo_id)
+subhalo = il.groupcat.loadSingle(directory, snap_number, subhaloID=subhalo_id)
 gal_centre = subhalo['SubhaloPos'] * (scale_factor / h)
 
 star_fields = ["GFM_StellarFormationTime", "Coordinates"]

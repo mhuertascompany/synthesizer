@@ -483,29 +483,29 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             redshift=opt_stars.redshift,
             centre=opt_stars.centre
         )
-        chunk_stars.parent = target_galaxy
+        # chunk_stars.parent = target_galaxy # REMOVED: Not needed and potentially disruptive
         chunk_tau_v = tau_v[i:end]
         
         # get_particle_spectra for this chunk
         spectra_dict = chunk_stars.get_particle_spectra(emission_model=model, tau_v=chunk_tau_v, nthreads=opt['nthreads_spectra'], verbose=False)
         particle_spectra = spectra_dict.get('attenuated', list(spectra_dict.values())[0]) if isinstance(spectra_dict, dict) else spectra_dict
         
-        # --- DIAGNOSTIC: Check for H-alpha peak in rest-frame ---
+        # --- DIAGNOSTIC: Check for H-alpha peak in young population ---
         young_mask = (chunk_stars.ages.to('Myr').value < 10.0)
-        if np.any(young_mask):
+        num_chunk_young = np.sum(young_mask)
+        if num_chunk_young > 0:
             # REST FRAME H-alpha is at 6563A
             ha_mask = (particle_spectra.lam.to(Angstrom).value > 6555) & (particle_spectra.lam.to(Angstrom).value < 6575)
-            if np.any(ha_mask):
-                idx_young = np.where(young_mask)[0][0] # Check first young star
-                ha_fluxes = particle_spectra.lnu[idx_young, ha_mask]
-                cont_fluxes = particle_spectra.lnu[idx_young, ~ha_mask]
-                max_ha = np.max(ha_fluxes)
-                mean_cont = np.mean(cont_fluxes)
-                print(f"      CHUNK DIAGNOSTIC (Young Star @ star {i + idx_young}): H-alpha max={max_ha:.2e}, Continuum mean={mean_cont:.2e}, Ratio={max_ha/mean_cont:.1f}", flush=True)
+            cont_mask = (particle_spectra.lam.to(Angstrom).value > 6590) & (particle_spectra.lam.to(Angstrom).value < 6610)
+            if np.any(ha_mask) and np.any(cont_mask):
+                # Average over all young stars in the chunk
+                ha_fluxes = np.mean(particle_spectra.lnu[young_mask][:, ha_mask])
+                cont_fluxes = np.mean(particle_spectra.lnu[young_mask][:, cont_mask])
+                avg_tau_v = np.mean(chunk_tau_v[young_mask])
+                ratio = ha_fluxes / cont_fluxes
+                print(f"      CHUNK DIAGNOSTIC ({num_chunk_young} young stars): H-alpha Flux={ha_fluxes:.2e}, Ratio={ratio:.2f}, Mean Tau_V={avg_tau_v:.2f}", flush=True)
             else:
-                # Only print this once if it happens
-                if i == 0:
-                    print("      DIAGNOSTIC: H-alpha wavelength not in grid?!", flush=True)
+                if i == 0: print("      DIAGNOSTIC: Spectral grid missing H-alpha or continuum range.", flush=True)
         
         # --- Euclid VIS Integration ---
         nu_rest = particle_spectra.nu.to('Hz').value
@@ -698,19 +698,9 @@ def generate_euclid_vis_image(config):
     else:
         vis_filter = FilterCollection(filter_codes=["Euclid/VIS.vis"], new_lam=grid.lam)[0]
 
-    # Fixing missing emission lines: Provide explicit ionization parameter and escape fractions
-    # Some grids use log10_ionisation_parameter, others log10ionisation_parameter or ionisation_parameter
-    # We provide multiple variants to be robust. 
-    # Also ensure fesc_ly_alpha is 1.0 (full line production) and fesc is 0.0 (no escape before reprocessing)
-    nebular_model = ReprocessedEmission(
-        grid=grid, 
-        fesc=0.0, 
-        fesc_ly_alpha=1.0,
-        log10_ionisation_parameter=-2.0,
-        log10ionisation_parameter=-2.0,
-        ionisation_parameter=0.01
-    )
-    model = AttenuatedEmission(grid=grid, dust_curve=Calzetti2000(), apply_to=nebular_model, emitter="stellar")
+    # Fixing missing emission lines: Standard reprocessed model works for this grid
+    # No manual U fix or escape overrides needed as confirmed by diagnostics
+    model = AttenuatedEmission(grid=grid, dust_curve=Calzetti2000(), apply_to=ReprocessedEmission(grid=grid), emitter="stellar")
 
     
     # Parallel Processing

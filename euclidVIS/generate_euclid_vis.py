@@ -683,6 +683,12 @@ def generate_euclid_vis_image(config):
     # Load shared resources (Parent Process)
     print("Loading shared resources (grid, filter, model)...", flush=True)
     grid = Grid(sim['grid_name'], grid_dir=paths['grid_dir'])
+    print(f"  GRID DIAGNOSTIC: reprocessed={grid.reprocessed}", flush=True)
+    print(f"  GRID DIAGNOSTIC: axes={grid.axes}", flush=True)
+    print(f"  GRID DIAGNOSTIC: extract_axes={grid._extract_axes}", flush=True)
+    if hasattr(grid, 'available_line_emissions'):
+        print(f"  GRID DIAGNOSTIC: available lines={len(grid.available_line_emissions)}", flush=True)
+
     
     vis_filter = None
     local_filter = os.path.join(paths['grid_dir'], paths.get('filter_file', 'Euclid_VIS.vis.dat'))
@@ -692,7 +698,20 @@ def generate_euclid_vis_image(config):
     else:
         vis_filter = FilterCollection(filter_codes=["Euclid/VIS.vis"], new_lam=grid.lam)[0]
 
-    model = AttenuatedEmission(grid=grid, dust_curve=Calzetti2000(), apply_to=ReprocessedEmission(grid=grid), emitter="stellar")
+    # Fixing missing emission lines: Provide explicit ionization parameter and escape fractions
+    # Some grids use log10_ionisation_parameter, others log10ionisation_parameter or ionisation_parameter
+    # We provide multiple variants to be robust. 
+    # Also ensure fesc_ly_alpha is 1.0 (full line production) and fesc is 0.0 (no escape before reprocessing)
+    nebular_model = ReprocessedEmission(
+        grid=grid, 
+        fesc=0.0, 
+        fesc_ly_alpha=1.0,
+        log10_ionisation_parameter=-2.0,
+        log10ionisation_parameter=-2.0,
+        ionisation_parameter=0.01
+    )
+    model = AttenuatedEmission(grid=grid, dust_curve=Calzetti2000(), apply_to=nebular_model, emitter="stellar")
+
     
     # Parallel Processing
     n_jobs = config['optimization'].get('n_jobs', 1)

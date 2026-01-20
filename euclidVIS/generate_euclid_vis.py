@@ -79,7 +79,7 @@ def load_IllustrisTNG_fixed(
         galaxy.centre = pos * kpc
 
         # Load Stars
-        star_fields = ["GFM_StellarFormationTime", "Coordinates", "Masses", "GFM_InitialMass", "GFM_Metallicity", "SubfindHsml"]
+        star_fields = ["GFM_StellarFormationTime", "Coordinates", "Masses", "GFM_InitialMass", "GFM_Metallicity", "SubfindHsml", "Velocities"]
         if metals: star_fields.append("GFM_Metals")
         out_stars = il.snapshot.loadSubhalo(directory, snap_number, idx, "stars", fields=star_fields)
         if out_stars["count"] > 0:
@@ -90,11 +90,17 @@ def load_IllustrisTNG_fixed(
             metallicities = out_stars["GFM_Metallicity"][~mask]
             masses = out_stars["Masses"][~mask]
             hsml = out_stars["SubfindHsml"][~mask]
+            vels = out_stars["Velocities"][~mask] if "Velocities" in out_stars else None
+            
             masses = (masses * 1e10) / h
             imasses = (imasses * 1e10) / h
             if physical:
                 coods *= scale_factor
                 hsml *= scale_factor
+                # Velocities in TNG are km/s * sqrt(a), we want km/s
+                if vels is not None:
+                    vels *= np.sqrt(scale_factor)
+            
             cosmo_astropy = cosmo
             universe_age = cosmo_astropy.age(1.0 / scale_factor - 1)
             if age_lookup:
@@ -103,7 +109,7 @@ def load_IllustrisTNG_fixed(
             else:
                 _ages = cosmo_astropy.age(1.0 / form_time - 1)
             ages = (universe_age - _ages).value * 1e9  # yr
-            galaxy.load_stars(initial_masses=imasses * Msun, ages=ages * yr, metallicities=metallicities, coordinates=coods * kpc, current_masses=masses * Msun, smoothing_lengths=hsml * kpc if hsml is not None else None)
+            galaxy.load_stars(initial_masses=imasses * Msun, ages=ages * yr, metallicities=metallicities, coordinates=coods * kpc, current_masses=masses * Msun, smoothing_lengths=hsml * kpc if hsml is not None else None, velocities=vels * (km/s) if vels is not None else None)
 
         # Load Gas
         gas_fields = ["StarFormationRate", "Coordinates", "Masses", "GFM_Metallicity", "SubfindHsml"]
@@ -288,7 +294,19 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     d_lum = unyt_quantity.from_astropy(cosmo.luminosity_distance(z_obs).to(u.cm))
     scale_kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_obs).value / 60.0
     
-    # 1. Coordinate Projections and Rotation
+    # 0. Center all components IMMEDIATELY before any rotation
+    gal_centre = target_galaxy.centre
+    if gal_centre is not None:
+        print(f"  Centering components (Stars & Gas) to origin...", flush=True)
+        if target_galaxy.stars is not None:
+             target_galaxy.stars.coordinates -= gal_centre
+             target_galaxy.stars.centre = unyt_array([0, 0, 0], units='kpc')
+        if target_galaxy.gas is not None:
+             target_galaxy.gas.coordinates -= gal_centre
+             target_galaxy.gas.centre = unyt_array([0, 0, 0], units='kpc')
+        target_galaxy.centre = unyt_array([0, 0, 0], units='kpc')
+
+    # 1. Coordinate Projections and Rotation (Now safe around origin)
     proj_type = proj.get('type', 'manual')
     if proj_type == 'random':
         phi, theta = np.random.uniform(0, 2*np.pi), np.random.uniform(0, np.pi)
@@ -323,11 +341,6 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     
     # 1. Coordinate Projections and Rotation for Stars
     # clipping to FOV
-    star_coords = target_galaxy.stars.coordinates
-    # Robust centering: use star centre if available, else galaxy centre
-    star_centre = target_galaxy.stars.centre if target_galaxy.stars.centre is not None else target_galaxy.centre
-    if star_centre is not None:
-        target_galaxy.stars.coordinates -= star_centre # INPLACE FIX
     star_fov_mask = (np.abs(target_galaxy.stars.coordinates[:, 0]) < fov_limit) & (np.abs(target_galaxy.stars.coordinates[:, 1]) < fov_limit)
     star_indices = np.where(star_fov_mask)[0]
     
@@ -347,7 +360,7 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         smoothing_lengths=target_galaxy.stars.smoothing_lengths[sampled_indices],
         velocities=target_galaxy.stars.velocities[sampled_indices] if target_galaxy.stars.velocities is not None else None,
         redshift=target_galaxy.stars.redshift,
-        centre=star_centre
+        centre=target_galaxy.stars.centre
     )
 
     # --- ROBUST INITIALIZATION ---
@@ -363,12 +376,6 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         
         if not hasattr(target_gas, 'dust_masses'):
             target_gas.dust_masses = target_gas.masses * target_gas.metallicities * mod['dust_to_metal']
-        
-        gas_coords = target_gas.coordinates
-        # Robust centering
-        gas_centre = target_gas.centre if target_gas.centre is not None else target_galaxy.centre
-        if gas_centre is not None:
-             target_gas.coordinates -= gas_centre # INPLACE FIX
             
         gas_fov_mask = (np.abs(target_gas.coordinates[:, 0]) < fov_limit + 50*kpc) & (np.abs(target_gas.coordinates[:, 1]) < fov_limit + 50*kpc)
         gas_indices = np.where(gas_fov_mask)[0]
@@ -385,9 +392,9 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
                 metallicities=target_gas.metallicities[sampled_gas_indices],
                 coordinates=target_gas.coordinates[sampled_gas_indices],
                 smoothing_lengths=target_gas.smoothing_lengths[sampled_gas_indices],
-                dust_masses=target_gas.dust_masses[sampled_gas_indices],
+                dust_masses=target_gas.dust_gas_masses[sampled_gas_indices] if hasattr(target_gas, 'dust_gas_masses') else target_gas.dust_masses[sampled_gas_indices],
                 redshift=target_gas.redshift,
-                centre=gas_centre
+                centre=target_gas.centre
             )
     
     # 3. Calculate Spectra

@@ -75,7 +75,7 @@ def load_IllustrisTNG_fixed(
             
         galaxy = Galaxy(verbose=False)
         galaxy.redshift = redshift
-        if physical: pos *= scale_factor
+        if physical: pos *= (scale_factor / h) # Convert ckpc/h to kpc
         galaxy.centre = pos * kpc
 
         # Load Stars
@@ -95,8 +95,8 @@ def load_IllustrisTNG_fixed(
             masses = (masses * 1e10) / h
             imasses = (imasses * 1e10) / h
             if physical:
-                coods *= scale_factor
-                hsml *= scale_factor
+                coods *= (scale_factor / h) # Convert ckpc/h to kpc
+                hsml *= (scale_factor / h)
                 # Velocities in TNG are km/s * sqrt(a), we want km/s
                 if vels is not None:
                     vels *= np.sqrt(scale_factor)
@@ -123,8 +123,8 @@ def load_IllustrisTNG_fixed(
             g_masses = (g_masses * 1e10) / h
             star_forming = g_sfr > 0.0
             if physical:
-                g_coods *= scale_factor
-                g_hsml *= scale_factor
+                g_coods *= (scale_factor / h) # Convert ckpc/h to kpc
+                g_hsml *= (scale_factor / h)
             galaxy.load_gas(coordinates=g_coods * kpc, masses=g_masses * Msun, metallicities=g_metals, star_forming=star_forming, smoothing_lengths=g_hsml * kpc, dust_to_metal_ratio=dtm)
         else:
             # Check if catalog says there should be gas
@@ -266,7 +266,11 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     desi_conf = config.get('desi', {})
     proj = config.get('projection', {})
     
-    # Initial check for stellar component
+    print(f"\nProcessing Subhalo {subhalo_id}...", flush=True)
+    if desi_conf.get('enabled', False):
+        print("  DESI mock generation ENABLED.", flush=True)
+    else:
+        print("  DESI mock generation DISABLED.", flush=True)
     if target_galaxy.stars is None:
         print(f"  ERROR: Subhalo {subhalo_id} has no stars! Skipping.", flush=True)
         return

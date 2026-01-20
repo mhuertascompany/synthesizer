@@ -201,7 +201,9 @@ def load_config():
     if args.max_galaxies: config['simulation']['max_galaxies'] = args.max_galaxies
     if args.subhalo_ids: config['simulation']['subhalo_ids'] = args.subhalo_ids
     if args.grid_name: config['simulation']['grid_name'] = args.grid_name
-    if args.z_obs is not None: config['observation']['z_obs'] = args.z_obs
+    if args.z_obs is not None: 
+        config['observation']['z_obs'] = args.z_obs
+        config['observation']['randomize_redshift'] = False
     if args.fov_kpc: config['observation']['fov_kpc'] = args.fov_kpc
     if args.pixel_scale: config['observation']['pixel_scale_arcsec'] = args.pixel_scale
     if args.fwhm: config['observation']['fwhm_arcsec'] = args.fwhm
@@ -325,8 +327,8 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     # Robust centering: use star centre if available, else galaxy centre
     star_centre = target_galaxy.stars.centre if target_galaxy.stars.centre is not None else target_galaxy.centre
     if star_centre is not None:
-        star_coords = star_coords - star_centre # Explicit new array
-    star_fov_mask = (np.abs(star_coords[:, 0]) < fov_limit) & (np.abs(star_coords[:, 1]) < fov_limit)
+        target_galaxy.stars.coordinates -= star_centre # INPLACE FIX
+    star_fov_mask = (np.abs(target_galaxy.stars.coordinates[:, 0]) < fov_limit) & (np.abs(target_galaxy.stars.coordinates[:, 1]) < fov_limit)
     star_indices = np.where(star_fov_mask)[0]
     
     star_weight_scale = 1.0
@@ -366,9 +368,9 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         # Robust centering
         gas_centre = target_gas.centre if target_gas.centre is not None else target_galaxy.centre
         if gas_centre is not None:
-             gas_coords = gas_coords - gas_centre
+             target_gas.coordinates -= gas_centre # INPLACE FIX
             
-        gas_fov_mask = (np.abs(gas_coords[:, 0]) < fov_limit + 50*kpc) & (np.abs(gas_coords[:, 1]) < fov_limit + 50*kpc)
+        gas_fov_mask = (np.abs(target_gas.coordinates[:, 0]) < fov_limit + 50*kpc) & (np.abs(target_gas.coordinates[:, 1]) < fov_limit + 50*kpc)
         gas_indices = np.where(gas_fov_mask)[0]
         
         num_gas_in_fov = len(gas_indices)
@@ -453,6 +455,24 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         # get_particle_spectra for this chunk
         spectra_dict = chunk_stars.get_particle_spectra(emission_model=model, tau_v=chunk_tau_v, nthreads=opt['nthreads_spectra'], verbose=False)
         particle_spectra = spectra_dict.get('attenuated', list(spectra_dict.values())[0]) if isinstance(spectra_dict, dict) else spectra_dict
+        
+        # --- DIAGNOSTIC: Check for H-alpha peak in rest-frame ---
+        if i == 0: # Check first chunk
+            young_mask = (chunk_stars.ages.to('Myr').value < 10.0)
+            if np.any(young_mask):
+                # REST FRAME H-alpha is at 6563A
+                ha_mask = (particle_spectra.lam.to(Angstrom).value > 6555) & (particle_spectra.lam.to(Angstrom).value < 6575)
+                if np.any(ha_mask):
+                    idx_young = np.where(young_mask)[0][0] # Check first young star
+                    ha_fluxes = particle_spectra.lnu[idx_young, ha_mask]
+                    cont_fluxes = particle_spectra.lnu[idx_young, ~ha_mask]
+                    max_ha = np.max(ha_fluxes)
+                    mean_cont = np.mean(cont_fluxes)
+                    print(f"      DIAGNOSTIC (Young Star 0): H-alpha max={max_ha:.2e}, Continuum mean={mean_cont:.2e}, Ratio={max_ha/mean_cont:.1f}", flush=True)
+                else:
+                    print("      DIAGNOSTIC: H-alpha wavelength not in grid?!", flush=True)
+            else:
+                print("      DIAGNOSTIC: No young stars in this chunk.", flush=True)
         
         # --- Euclid VIS Integration ---
         nu_rest = particle_spectra.nu.to('Hz').value

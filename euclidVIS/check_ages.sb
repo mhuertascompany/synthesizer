@@ -1,22 +1,20 @@
 #!/bin/bash -l
 #
-# Diagnostic job script for MPCDF VERA.
+# Definitive Diagnostic for H-alpha
 #
-#SBATCH -J CHECK_HA
+#SBATCH -J DIAG_HA
 #SBATCH -o /u/mhuertas/data/synthesizer/logs/out.%j
 #SBATCH -e /u/mhuertas/data/synthesizer/logs/err.%j
 #SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
 #SBATCH -p p.vera
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=16G
+#SBATCH --mem=12G
 #SBATCH --time=00:30:00
 
 module purge
 module load anaconda/3/2023.03
 
-# activate virtual environment
 source /u/mhuertas/python/envs/synth/bin/activate
 
-# Run the diagnostic script
 python3 ./check_ages.py 

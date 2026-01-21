@@ -1,0 +1,19 @@
+#!/bin/bash -l
+#
+# Find Star-Forming Candidates
+#
+#SBATCH -J FIND_SF
+#SBATCH -o /u/mhuertas/data/synthesizer/logs/find_sf.out
+#SBATCH -e /u/mhuertas/data/synthesizer/logs/find_sf.err
+#SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=8G
+#SBATCH --time=00:10:00
+
+module purge
+module load anaconda/3/2023.03
+source /u/mhuertas/python/envs/synth/bin/activate
+
+python3 find_sf_candidates.py

@@ -345,6 +345,8 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             safe_rotate(target_galaxy.stars, phi=phi*rad, theta=theta*rad, proj_type='manual')
             safe_rotate(target_galaxy.gas, phi=phi*rad, theta=theta*rad, proj_type='manual')
 
+            safe_rotate(target_galaxy.gas, phi=phi*rad, theta=theta*rad, proj_type='manual')
+
     # FOV and Resolution
     fov_kpc = obs['fov_kpc']
     fov_arcsec = fov_kpc / scale_kpc_per_arcsec
@@ -502,7 +504,14 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         chunk_tau_v = tau_v[i:end]
         
         # get_particle_spectra for this chunk
-        spectra_dict = chunk_stars.get_particle_spectra(emission_model=model, tau_v=chunk_tau_v, nthreads=opt['nthreads_spectra'], verbose=False)
+        vel_shift = mod.get('vel_shift', False)
+        spectra_dict = chunk_stars.get_particle_spectra(
+            emission_model=model, 
+            tau_v=chunk_tau_v, 
+            nthreads=opt['nthreads_spectra'], 
+            vel_shift=vel_shift,
+            verbose=False
+        )
         particle_spectra = spectra_dict.get('attenuated', list(spectra_dict.values())[0]) if isinstance(spectra_dict, dict) else spectra_dict
         
         # --- DIAGNOSTIC: Check for H-alpha peak in young population ---
@@ -581,13 +590,16 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     hdu.header['KAPPA'] = mod['kappa']
     hdu.header['DTM'] = mod['dust_to_metal']
     hdu.header['CURVE'] = mod['dust_curve']
+    hdu.header['VELSHIFT'] = mod.get('vel_shift', False)
     hdu.writeto(os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}.fits"), overwrite=True)
     print(f"  Euclid images saved to {euclid_dir}", flush=True)
 
     # --- 5. DESI Output ---
     if desi_conf.get('enabled', False):
         if lnu_fiber_total is not None:
-            fnu_fiber = (lnu_fiber_total / (4 * np.pi * d_lum**2)).to('erg/s/cm**2/Hz').value
+            # SYNC: Apply the (1+z) factor for observed flux density properly
+            # F_nu(obs) = L_nu(rest) * (1+z) / (4 * pi * DL^2)
+            fnu_fiber = (lnu_fiber_total / (4 * np.pi * d_lum**2) * (1 + z_obs)).to('erg/s/cm**2/Hz').value
             
             # Save DESI
             desi_subdir = config['paths'].get('desi_subdir', 'DESI')
@@ -615,6 +627,7 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             hdu_desi.header['KAPPA'] = mod['kappa']
             hdu_desi.header['DTM'] = mod['dust_to_metal']
             hdu_desi.header['CURVE'] = mod['dust_curve']
+            hdu_desi.header['VELSHIFT'] = mod.get('vel_shift', False)
             hdu_desi.writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}.fits"), overwrite=True)
             print(f"  DESI spectra saved to {desi_dir}", flush=True)
         else:

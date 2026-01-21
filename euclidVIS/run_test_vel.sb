@@ -1,0 +1,14 @@
+#!/bin/bash
+#SBATCH --job-name=test_vel
+#SBATCH --partition=debug
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --time=00:20:00
+#SBATCH --mem=32G
+#SBATCH --output=%x.o%j
+#SBATCH --error=%x.e%j
+
+source ~/.bashrc
+conda activate synthesizer
+
+python /Users/marchuertascompany/Documents/python_scripts/synthesizer/euclidVIS/test_velocity_projection.py

@@ -10,8 +10,8 @@ paths:
 
 simulation:
   snap_number: 99
-  stellar_mass_limit: 3.16e8 # 10^8.5 Msun
-  max_stellar_mass: 3.16e9 # 10^9.5 Msun
+  stellar_mass_limit: 3.16e9 # 10^9.5 Msun
+  max_stellar_mass: 1e11 # 10^11 Msun
   batch: true # Process all galaxies above limit if true
   max_galaxies: null # Set to a small number for debugging, null for full snapshot
   subhalo_ids: [0] # Used if batch is false or specific IDs are needed
@@ -30,6 +30,7 @@ model:
   kappa: 20.0
   dust_to_metal: 0.4
   dust_curve: "Calzetti2000"
+  vel_shift: false # Apply doppler shift to spectra
 
 optimization:
   particle_limit: -1 # Set to null or -1 to disable limit (use all particles)

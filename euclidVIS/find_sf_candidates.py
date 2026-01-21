@@ -25,7 +25,7 @@ indices = np.where(mask)[0]
 
 if len(indices) == 0:
     print("No candidates found with those cuts, relaxing...")
-    mask = (m_star > 1e8.5) & (m_star < 1e10) & (sfr > 0.05)
+    mask = (m_star > 10**8.5) & (m_star < 1e10) & (sfr > 0.05)
     indices = np.where(mask)[0]
 
 # Sort by sSFR to find the most "active" galaxies

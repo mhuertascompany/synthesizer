@@ -321,9 +321,10 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
 
     # 1. Coordinate Projections and Rotation (Now safe around origin)
     proj_type = proj.get('type', 'manual')
+    phi, theta = 0.0, 0.0
     if proj_type == 'random':
         phi, theta = np.random.uniform(0, 2*np.pi), np.random.uniform(0, np.pi)
-        print(f"  Projection: random (phi={phi:.3f}, theta={theta:.3f})")
+        print(f"  RANDOM ROTATION TRIGGERED: phi={phi:.3f}, theta={theta:.3f} rad", flush=True)
         safe_rotate(target_galaxy.stars, phi=phi*rad, theta=theta*rad, proj_type='random')
         safe_rotate(target_galaxy.gas, phi=phi*rad, theta=theta*rad, proj_type='random')
     elif proj_type == 'face-on':
@@ -447,13 +448,16 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     r_arcsec = np.sqrt(coords_for_img[:, 0].to(kpc).value**2 + coords_for_img[:, 1].to(kpc).value**2) / scale_kpc_per_arcsec
     
     desi_enabled = desi_conf.get('enabled', False)
-    desi_mask_global = r_arcsec <= (desi_conf['fiber_diameter_arcsec'] / 2.0) if desi_enabled else None
-    
     if desi_enabled:
+        desi_mask_global = r_arcsec <= (desi_conf['fiber_diameter_arcsec'] / 2.0)
         num_in_fiber = np.sum(desi_mask_global)
-        print(f"  DESI DIAGNOSTIC: {num_in_fiber} stars found inside {desi_conf['fiber_diameter_arcsec']}\" fiber.", flush=True)
+        
+        # Count young stars in fiber
+        young_in_fiber = np.sum(desi_mask_global & (opt_stars.ages.to('Myr').value < 10.0))
+        
+        print(f"  DESI FIBER DIAGNOSTIC: {num_in_fiber} total stars, {young_in_fiber} young stars (<10 Myr) in fiber.", flush=True)
         if num_in_fiber > 0:
-            print(f"  DESI DIAGNOSTIC: r_arcsec range: {np.min(r_arcsec[desi_mask_global]):.3f} to {np.max(r_arcsec[desi_mask_global]):.3f}", flush=True)
+            print(f"  DESI FIBER DIAGNOSTIC: r_arcsec range in fiber: {np.min(r_arcsec[desi_mask_global]):.3f} to {np.max(r_arcsec[desi_mask_global]):.3f}", flush=True)
         else:
             print(f"  DESI DIAGNOSTIC: min(r_arcsec) = {np.min(r_arcsec):.3f}", flush=True)
 
@@ -645,12 +649,16 @@ def process_single_galaxy_wrapper(subhalo_id, config, grid, vis_filter, model):
 
         galaxy = galaxies[0]
         
-        # Randomize redshift if requested (thread-safe random state)
+        # Unconditional seeding for workers to ensure unique randomness across runs
+        # mixing subhalo_id and nano-time to maximize divergence
+        worker_seed = int((int(subhalo_id) * 31 + int(time.time() * 1000000)) % 4294967295)
+        np.random.seed(worker_seed)
+        print(f"Subhalo {subhalo_id}: Worker seeded with {worker_seed}", flush=True)
+
+        # Randomize redshift if requested
         obs_conf = config['observation']
         if obs_conf.get('randomize_redshift', False):
             z_min, z_max = obs_conf.get('z_min', 0.0), obs_conf.get('z_max', 1.5)
-            # Seed with subhalo_id to be deterministic but different per galaxy
-            np.random.seed(int(subhalo_id) + int(time.time())) 
             z_rand = float(np.random.uniform(z_min, z_max))
             obs_conf['z_obs'] = z_rand
             

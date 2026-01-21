@@ -5,11 +5,13 @@ paths:
   grid_dir: "/u/mhuertas/data/synthesizer"
   output_path: "/u/mhuertas/data/euclid/tngmocks"
   filter_file: "Euclid_VIS.vis.dat" # Looked for in grid_dir
+  euclid_subdir: "Euclid_fixed"
+  desi_subdir: "DESI_fixed"
 
 simulation:
   snap_number: 99
-  stellar_mass_limit: 1.0e11 # Msun
-  max_stellar_mass: 1.0e12 # Skip galaxies larger than this (e.g. Subhalo 0) to speed up run
+  stellar_mass_limit: 3.16e8 # 10^8.5 Msun
+  max_stellar_mass: 3.16e9 # 10^9.5 Msun
   batch: true # Process all galaxies above limit if true
   max_galaxies: null # Set to a small number for debugging, null for full snapshot
   subhalo_ids: [0] # Used if batch is false or specific IDs are needed

@@ -30,6 +30,7 @@ def load_IllustrisTNG_fixed(
     directory=".",
     snap_number=99,
     stellar_mass_limit=1e10,
+    stellar_mass_max=None,
     subhalo_ids=None,
     max_galaxies=None,
     verbose=True,
@@ -58,6 +59,8 @@ def load_IllustrisTNG_fixed(
         subhalo_mask[subhalo_ids] = True
     else:
         subhalo_mask = (stellar_mass * 1e10) > float(stellar_mass_limit)
+        if stellar_mass_max is not None:
+            subhalo_mask &= (stellar_mass * 1e10) < float(stellar_mass_max)
         
     all_indices = np.where(subhalo_mask)[0]
     if only_ids:
@@ -557,7 +560,8 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
 
     # --- 4. Imaging Output ---
     # Save Euclid
-    euclid_dir = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", "Euclid")
+    euclid_subdir = config['paths'].get('euclid_subdir', 'Euclid')
+    euclid_dir = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", euclid_subdir)
     os.makedirs(euclid_dir, exist_ok=True)
     
     # Raw Image
@@ -571,6 +575,12 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     hdu.header['REDSHIFT'] = z_obs
     hdu.header['SUBHALO'] = subhalo_id
     hdu.header['MASS'] = stellar_mass
+    hdu.header['PHI'] = phi
+    hdu.header['THETA'] = theta
+    hdu.header['SNAP'] = config['simulation']['snap_number']
+    hdu.header['KAPPA'] = mod['kappa']
+    hdu.header['DTM'] = mod['dust_to_metal']
+    hdu.header['CURVE'] = mod['dust_curve']
     hdu.writeto(os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}.fits"), overwrite=True)
     print(f"  Euclid images saved to {euclid_dir}", flush=True)
 
@@ -580,7 +590,8 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             fnu_fiber = (lnu_fiber_total / (4 * np.pi * d_lum**2)).to('erg/s/cm**2/Hz').value
             
             # Save DESI
-            desi_dir = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", "DESI")
+            desi_subdir = config['paths'].get('desi_subdir', 'DESI')
+            desi_dir = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", desi_subdir)
             os.makedirs(desi_dir, exist_ok=True)
             
             # Raw Spectrum
@@ -598,6 +609,12 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             hdu_desi.header['REDSHIFT'] = z_obs
             hdu_desi.header['SUBHALO'] = subhalo_id
             hdu_desi.header['MASS'] = stellar_mass
+            hdu_desi.header['PHI'] = phi
+            hdu_desi.header['THETA'] = theta
+            hdu_desi.header['SNAP'] = config['simulation']['snap_number']
+            hdu_desi.header['KAPPA'] = mod['kappa']
+            hdu_desi.header['DTM'] = mod['dust_to_metal']
+            hdu_desi.header['CURVE'] = mod['dust_curve']
             hdu_desi.writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}.fits"), overwrite=True)
             print(f"  DESI spectra saved to {desi_dir}", flush=True)
         else:
@@ -676,6 +693,8 @@ def generate_euclid_vis_image(config):
     print(f"Loading TNG catalog for snap {sim['snap_number']} to identify targets...", flush=True)
     # Lightweight loading of candidates (metadata only)
     limit = float(sim.get('stellar_mass_limit', 1e10))
+    limit_max = sim.get('max_stellar_mass')
+    if limit_max is not None: limit_max = float(limit_max)
     
     
     # Filter candidates using the robust loader
@@ -683,6 +702,7 @@ def generate_euclid_vis_image(config):
         directory=paths['tng_path'], 
         snap_number=sim['snap_number'], 
         stellar_mass_limit=limit,
+        stellar_mass_max=limit_max,
         subhalo_ids=sim.get('subhalo_ids') if not sim.get('batch', False) else None,
         verbose=True,
         only_ids=True

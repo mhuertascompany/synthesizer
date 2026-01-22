@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=gen_summary
-#SBATCH -o /u/mhuertas/data/synthesizer/logs/summary.%j
-#SBATCH -e /u/mhuertas/data/synthesizer/logs/summary.%j
+#SBATCH -o /u/mhuertas/data/synthesizer/logs/summary.out.%j
+#SBATCH -e /u/mhuertas/data/synthesizer/logs/summary.err.%j
 #SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
 #SBATCH -p p.vera
 #SBATCH --ntasks=1
@@ -9,7 +9,10 @@
 #SBATCH --mem=32G
 #SBATCH --time=00:30:00
 
-source ~/.bashrc
-conda activate synthesizer
+module purge
+module load anaconda/3/2023.03
 
-python /Users/marchuertascompany/Documents/python_scripts/synthesizer/euclidVIS/generate_summary_pdf.py
+# activate virtual environment
+source /u/mhuertas/python/envs/synth/bin/activate
+
+python3 ./generate_summary_pdf.py

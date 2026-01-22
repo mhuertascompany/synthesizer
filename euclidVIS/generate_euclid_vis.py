@@ -652,7 +652,8 @@ def process_single_galaxy_wrapper(subhalo_id, config, grid, vis_filter, model):
         # Check if output already exists (Idempotency)
         paths = config['paths']
         snap_number = config['simulation']['snap_number']
-        euclid_dir = os.path.join(paths['output_path'], f"sn{snap_number}", "Euclid")
+        euclid_subdir = paths.get('euclid_subdir', 'Euclid')
+        euclid_dir = os.path.join(paths['output_path'], f"sn{snap_number}", euclid_subdir)
         expected_file = os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}.fits")
         
         force = config.get('optimization', {}).get('force_overwrite', False)

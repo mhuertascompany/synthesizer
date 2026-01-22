@@ -26,6 +26,15 @@ TNG_BASE_PATH = "/virgotng/universe/IllustrisTNG/TNG50-1/output"
 SNAP_NUM = 99
 OUTPUT_PDF = "euclid_desi_summary.pdf"
 
+# Emission Lines to mark (Rest Frame Angstroms)
+EMISSION_LINES = {
+    r"H$\alpha$": 6562.8,
+    r"H$\beta$": 4861.3,
+    r"[OIII]": 5006.8,
+    r"[OII]": 3727.0, # Doublet blend
+    r"[NII]": 6583.0
+}
+
 def get_sfrs(subhalo_ids):
     """Fetch SFRs for the given subhalos using illustris_python."""
     if not HAS_ILLUSTRIS:
@@ -40,10 +49,10 @@ def get_sfrs(subhalo_ids):
         # il.groupcat.loadSubhalos returns all unless filtered?
         # Actually loadSubhalos loads everything. 
         # For efficiency, we just load the SFR field.
-        fields = ['SubhaloStarFormationRate']
+        fields = ['SubhaloSFR']
         subhalos = il.groupcat.loadSubhalos(TNG_BASE_PATH, SNAP_NUM, fields=fields)
         
-        all_sfrs = subhalos['SubhaloStarFormationRate'] # In Msun/yr ?? No, check units.
+        all_sfrs = subhalos['SubhaloSFR'] # In Msun/yr ?? No, check units.
         # TNG SFR is usually distinct. 
         # We just need to map them.
         
@@ -83,8 +92,10 @@ def plot_galaxy(pdf, subhalo_row, euclid_path, desi_path):
             plt.colorbar(im, ax=axes[0], fraction=0.046, pad=0.04)
         except Exception as e:
             axes[0].text(0.5, 0.5, f"Error loading image:\n{e}", ha='center')
+        except Exception as e:
+            axes[0].text(0.5, 0.5, f"Error loading image:\n{e}", ha='center')
     else:
-        axes[0].text(0.5, 0.5, "Image not found", ha='center')
+        axes[0].text(0.5, 0.5, f"Image not found:\n{img_file}", ha='center', fontsize=8)
         
     # 2. DESI Spectrum
     spec_file = os.path.join(desi_path, f"desi_spectrum_{sid}.fits")
@@ -105,6 +116,14 @@ def plot_galaxy(pdf, subhalo_row, euclid_path, desi_path):
                 axes[1].set_title(f"DESI Spectrum (VelShift: {vshift})")
                 axes[1].grid(True, alpha=0.3)
                 
+                # Plot Emission Lines
+                ylim = axes[1].get_ylim()
+                for name, rest_lam in EMISSION_LINES.items():
+                    obs_lam = rest_lam * (1 + z)
+                    if 3500 < obs_lam < 9900:
+                        axes[1].axvline(obs_lam, color='r', linestyle='--', alpha=0.5, linewidth=0.8)
+                        axes[1].text(obs_lam, ylim[1]*0.9, name, rotation=90, color='r', fontsize=8, ha='right')
+
                 # Add zoom inset or just limits? 
                 # Let's keep full range but adding min/max
                 axes[1].set_xlim(3500, 9900)
@@ -147,26 +166,49 @@ def main():
     # Selection
     selection = []
     
+    # Helper to check if file exists
+    def has_image(sid):
+        return os.path.exists(os.path.join(EUCLID_DIR, f"euclid_vis_{sid}.fits"))
+
     # Top 10 Mass
-    selection.extend(df_sorted_mass.head(10).to_dict('records'))
+    count = 0
+    for _, row in df_sorted_mass.iterrows():
+        if count >= 10: break
+        if has_image(int(row['subhalo_id'])):
+            selection.append(row.to_dict())
+            count += 1
     
     # Top 10 SFR (if meaningful)
     if HAS_ILLUSTRIS and df['sfr'].max() > 0:
-        # Avoid duplicates
-        top_sfr = df_sorted_sfr.head(10)
+        count = 0
         existing_ids = {item['subhalo_id'] for item in selection}
-        for _, row in top_sfr.iterrows():
-            if row['subhalo_id'] not in existing_ids:
+        for _, row in df_sorted_sfr.iterrows():
+            if count >= 10: break
+            sid = row['subhalo_id']
+            if sid not in existing_ids and has_image(int(sid)):
                 selection.append(row.to_dict())
+                count += 1
+                existing_ids.add(sid)
                 
     # Random 10
     # Avoid duplicates
     existing_ids = {item['subhalo_id'] for item in selection}
     remaining = df[~df['subhalo_id'].isin(existing_ids)]
-    if len(remaining) > 0:
-        n_random = min(10, len(remaining))
-        random_sample = remaining.sample(n=n_random, random_state=42)
-        selection.extend(random_sample.to_dict('records'))
+    
+    # We need to filter remaining to only those that exist
+    # This might be slow if df is huge, but safe
+    remaining_valid = []
+    # Optimization: Shuffle first then pick until found 10
+    remaining = remaining.sample(frac=1.0, random_state=42) # Shuffle
+    
+    count = 0
+    for _, row in remaining.iterrows():
+        if count >= 10: break
+        if has_image(int(row['subhalo_id'])):
+            remaining_valid.append(row.to_dict())
+            count += 1
+            
+    selection.extend(remaining_valid)
         
     print(f"Generating PDF with {len(selection)} galaxies...")
     

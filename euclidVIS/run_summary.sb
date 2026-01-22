@@ -1,12 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=gen_summary
-#SBATCH --partition=debug
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --time=00:20:00
-#SBATCH --mem=16G
-#SBATCH --output=%x.o%j
-#SBATCH --error=%x.e%j
+#SBATCH -o /u/mhuertas/data/synthesizer/logs/summary.%j
+#SBATCH -e /u/mhuertas/data/synthesizer/logs/summary.%j
+#SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=32G
+#SBATCH --time=00:30:00
 
 source ~/.bashrc
 conda activate synthesizer

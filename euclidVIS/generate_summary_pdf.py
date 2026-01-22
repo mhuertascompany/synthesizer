@@ -57,10 +57,11 @@ def get_sfrs(subhalo_ids):
         # We just need to map them.
         
         # Create a map
-        sfr_map = {i: sfr for i, sfr in enumerate(all_sfrs)}
+        # Ensure keys are ints!
+        sfr_map = {int(i): sfr for i, sfr in enumerate(all_sfrs)}
         
-        # Extract for our IDs
-        return np.array([sfr_map.get(sid, 0.0) for sid in subhalo_ids])
+        # Extract for our IDs (ensure IDs are ints)
+        return np.array([sfr_map.get(int(sid), 0.0) for sid in subhalo_ids])
         
     except Exception as e:
         print(f"Failed to load SFRs: {e}")
@@ -156,6 +157,7 @@ def main():
     # Add SFR if possible
     if HAS_ILLUSTRIS:
         df['sfr'] = get_sfrs(df['subhalo_id'].values)
+        print(f"Max SFR found: {df['sfr'].max():.2f}")
     else:
         df['sfr'] = 0.0
 

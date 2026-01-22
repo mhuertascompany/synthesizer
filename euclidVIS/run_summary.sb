@@ -1,0 +1,14 @@
+#!/bin/bash
+#SBATCH --job-name=gen_summary
+#SBATCH --partition=debug
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --time=00:20:00
+#SBATCH --mem=16G
+#SBATCH --output=%x.o%j
+#SBATCH --error=%x.e%j
+
+source ~/.bashrc
+conda activate synthesizer
+
+python /Users/marchuertascompany/Documents/python_scripts/synthesizer/euclidVIS/generate_summary_pdf.py

@@ -52,7 +52,16 @@ def get_sfrs(subhalo_ids):
         fields = ['SubhaloSFR']
         subhalos = il.groupcat.loadSubhalos(TNG_BASE_PATH, SNAP_NUM, fields=fields)
         
-        all_sfrs = subhalos['SubhaloSFR'] # In Msun/yr ?? No, check units.
+        if isinstance(subhalos, dict):
+            all_sfrs = subhalos['SubhaloSFR']
+        else:
+            # Assume it returned the array directly (e.g. valid for single field request)
+            # Check if it has the right shape/properties to be sure? 
+            # For now assume it is the data.
+            print(f"DEBUG: subhalos is not a dict, assuming it is the data array. Shape: {getattr(subhalos, 'shape', 'Unknown')}")
+            all_sfrs = subhalos
+
+        # Create a map
         # TNG SFR is usually distinct. 
         # We just need to map them.
         
@@ -161,56 +170,33 @@ def main():
     else:
         df['sfr'] = 0.0
 
-    # Sort
-    df_sorted_mass = df.sort_values(by='stellar_mass', ascending=False)
-    df_sorted_sfr = df.sort_values(by='sfr', ascending=False)
-    
-    # Selection
+    # Selection - PURELY RANDOM as requested
     selection = []
     
     # Helper to check if file exists
     def has_image(sid):
         return os.path.exists(os.path.join(EUCLID_DIR, f"euclid_vis_{sid}.fits"))
 
-    # Top 10 Mass
+    print("Selecting random galaxies...")
+    
+    # Shuffle dataframe
+    df_shuffled = df.sample(frac=1.0, random_state=42)
+    
     count = 0
-    for _, row in df_sorted_mass.iterrows():
-        if count >= 10: break
-        if has_image(int(row['subhalo_id'])):
+    TARGET_COUNT = 30
+    
+    for _, row in df_shuffled.iterrows():
+        if count >= TARGET_COUNT: break
+        
+        sid = int(row['subhalo_id'])
+        if has_image(sid):
             selection.append(row.to_dict())
             count += 1
-    
-    # Top 10 SFR (if meaningful)
-    if HAS_ILLUSTRIS and df['sfr'].max() > 0:
-        count = 0
-        existing_ids = {item['subhalo_id'] for item in selection}
-        for _, row in df_sorted_sfr.iterrows():
-            if count >= 10: break
-            sid = row['subhalo_id']
-            if sid not in existing_ids and has_image(int(sid)):
-                selection.append(row.to_dict())
-                count += 1
-                existing_ids.add(sid)
-                
-    # Random 10
-    # Avoid duplicates
-    existing_ids = {item['subhalo_id'] for item in selection}
-    remaining = df[~df['subhalo_id'].isin(existing_ids)]
-    
-    # We need to filter remaining to only those that exist
-    # This might be slow if df is huge, but safe
-    remaining_valid = []
-    # Optimization: Shuffle first then pick until found 10
-    remaining = remaining.sample(frac=1.0, random_state=42) # Shuffle
-    
-    count = 0
-    for _, row in remaining.iterrows():
-        if count >= 10: break
-        if has_image(int(row['subhalo_id'])):
-            remaining_valid.append(row.to_dict())
-            count += 1
             
-    selection.extend(remaining_valid)
+    if count < TARGET_COUNT:
+        print(f"WARNING: Could only find {count} valid random galaxies (target: {TARGET_COUNT}).")
+
+    print(f"Generating PDF with {len(selection)} galaxies...")
         
     print(f"Generating PDF with {len(selection)} galaxies...")
     

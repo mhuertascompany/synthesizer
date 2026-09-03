@@ -152,3 +152,7 @@ examples/cloudy/data/*
 
 # Ignore memray outputs 
 **/memray-results/**
+
+# Private Euclid deep-field reference catalog and generated binary conversion
+euclidVIS/catalogs/physical properties deep-result.csv
+euclidVIS/catalogs/physical_properties_deep.fits

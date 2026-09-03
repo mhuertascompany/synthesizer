@@ -26,6 +26,33 @@ from astropy.io import fits
 from astropy.cosmology import Planck15 as cosmo
 import astropy.units as u
 
+
+MICROJY_CGS = 1e-29  # 1 microJy in erg / s / cm^2 / Hz
+
+
+def band_averaged_fnu(fnu, nu, transmission):
+    """Return band-averaged F_nu using Synthesizer's filter convention."""
+    in_band = transmission > 0
+    if not np.any(in_band):
+        return np.zeros(fnu.shape[:-1])
+
+    band_nu = nu[in_band]
+    band_transmission = transmission[in_band]
+    denominator = np.trapezoid(
+        band_transmission / band_nu,
+        x=band_nu,
+    )
+    if denominator == 0:
+        raise ValueError("Euclid VIS filter has zero integrated transmission")
+
+    numerator = np.trapezoid(
+        fnu[..., in_band] * band_transmission / band_nu,
+        x=band_nu,
+        axis=-1,
+    )
+    return numerator / denominator
+
+
 def load_IllustrisTNG_fixed(
     directory=".",
     snap_number=99,
@@ -75,7 +102,7 @@ def load_IllustrisTNG_fixed(
     for idx, pos in tqdm(zip(all_indices, subhalo_pos), total=len(all_indices), disable=not verbose):
         if max_galaxies is not None and processed_count >= max_galaxies:
             break
-            
+
         galaxy = Galaxy(verbose=False)
         galaxy.redshift = redshift
         if physical: pos *= (scale_factor / h) # Convert ckpc/h to kpc
@@ -452,6 +479,7 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     coords_for_img = opt_stars.coordinates
     r_arcsec = np.sqrt(coords_for_img[:, 0].to(kpc).value**2 + coords_for_img[:, 1].to(kpc).value**2) / scale_kpc_per_arcsec
     
+    desi_mask_global = None
     desi_enabled = desi_conf.get('enabled', False)
     if desi_enabled:
         desi_mask_global = r_arcsec <= (desi_conf['fiber_diameter_arcsec'] / 2.0)
@@ -531,12 +559,23 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             else:
                 if i == 0: print("      DIAGNOSTIC: Spectral grid missing H-alpha or continuum range.", flush=True)
         
-        # --- Euclid VIS Integration ---
+        # --- Euclid VIS photometry ---
         nu_rest = particle_spectra.nu.to('Hz').value
         lnu_rest = particle_spectra.lnu.to('erg/s/Hz').value
-        
-        # Integrate and scale by weights
-        chunk_flux_in_band = (np.abs(np.trapezoid(lnu_rest * t_rest, x=nu_rest, axis=-1)) * star_weight_scale) / (4 * np.pi * d_lum.value**2)
+
+        # Convert rest-frame L_nu to observed F_nu at
+        # nu_obs = nu_rest / (1 + z), then calculate the AB-style mean F_nu
+        # through VIS. MER expects each stamp pixel to be in microJy.
+        fnu_obs = (
+            lnu_rest
+            * (1 + z_obs)
+            / (4 * np.pi * d_lum.value**2)
+        )
+        chunk_fnu_microjy = (
+            band_averaged_fnu(fnu_obs, nu_rest, t_rest)
+            / MICROJY_CGS
+            * star_weight_scale
+        )
         
         # Histogram accumulation
         chunk_coords = coords_for_img[i:end]
@@ -545,7 +584,7 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             chunk_coords[:, 1].to(kpc).value, 
             bins=resolution, 
             range=[[-fov_kpc/2, fov_kpc/2], [-fov_kpc/2, fov_kpc/2]], 
-            weights=chunk_flux_in_band
+            weights=chunk_fnu_microjy
         )
         hist_total += hist_chunk
         
@@ -561,7 +600,8 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
                     lnu_fiber_total += chunk_lnu_fiber
         
         # Clean up chunk to save memory
-        del spectra_dict, particle_spectra, lnu_rest, chunk_stars, chunk_flux_in_band
+        del spectra_dict, particle_spectra, lnu_rest, fnu_obs
+        del chunk_stars, chunk_fnu_microjy
         gc.collect()
         print(f"    Chunk complete. Current progress: {end/num_stars*100:.1f}%. ({time.ctime()})", flush=True)
     
@@ -573,25 +613,46 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     euclid_dir = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", euclid_subdir)
     os.makedirs(euclid_dir, exist_ok=True)
     
-    # Raw Image
-    fits.PrimaryHDU(hist_total).writeto(os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}_raw.fits"), overwrite=True)
+    def add_euclid_header(hdu, image_type):
+        """Attach photometric and provenance metadata to a VIS image."""
+        hdu.header['OBJECT'] = f"Subhalo {subhalo_id}"
+        hdu.header['REDSHIFT'] = z_obs
+        hdu.header['SUBHALO'] = subhalo_id
+        hdu.header['MASS'] = stellar_mass
+        hdu.header['PHI'] = phi
+        hdu.header['THETA'] = theta
+        hdu.header['SNAP'] = config['simulation']['snap_number']
+        hdu.header['KAPPA'] = mod['kappa']
+        hdu.header['DTM'] = mod['dust_to_metal']
+        hdu.header['CURVE'] = mod['dust_curve']
+        hdu.header['VELSHIFT'] = mod.get('vel_shift', False)
+        hdu.header['BUNIT'] = 'uJy'
+        hdu.header['PHOTSYS'] = 'AB'
+        hdu.header['PIXSCALE'] = pixel_scale_arcsec
+        hdu.header['IMTYPE'] = image_type
+
+    # Raw, pre-PSF image. Use this product when MER applies its exposure PSF.
+    raw_hdu = fits.PrimaryHDU(hist_total)
+    add_euclid_header(raw_hdu, 'PRE_PSF')
+    raw_hdu.writeto(
+        os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}_raw.fits"),
+        overwrite=True,
+    )
     
     # Convolved Image
     sigma_pixels = (obs['fwhm_arcsec'] / 2.355) / pixel_scale_arcsec
     img_convolved = gaussian_filter(hist_total, sigma=sigma_pixels)
     hdu = fits.PrimaryHDU(img_convolved)
-    hdu.header['OBJECT'] = f"Subhalo {subhalo_id}"
-    hdu.header['REDSHIFT'] = z_obs
-    hdu.header['SUBHALO'] = subhalo_id
-    hdu.header['MASS'] = stellar_mass
-    hdu.header['PHI'] = phi
-    hdu.header['THETA'] = theta
-    hdu.header['SNAP'] = config['simulation']['snap_number']
-    hdu.header['KAPPA'] = mod['kappa']
-    hdu.header['DTM'] = mod['dust_to_metal']
-    hdu.header['CURVE'] = mod['dust_curve']
-    hdu.header['VELSHIFT'] = mod.get('vel_shift', False)
+    add_euclid_header(hdu, 'PSF_CONV')
     hdu.writeto(os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}.fits"), overwrite=True)
+    total_fnu_microjy = np.sum(hist_total)
+    if total_fnu_microjy > 0:
+        total_abmag = 23.9 - 2.5 * np.log10(total_fnu_microjy)
+        print(
+            f"  Euclid VIS total flux: {total_fnu_microjy:.4g} uJy "
+            f"(AB={total_abmag:.3f})",
+            flush=True,
+        )
     print(f"  Euclid images saved to {euclid_dir}", flush=True)
 
     # --- 5. DESI Output ---
@@ -608,7 +669,18 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             
             # Raw Spectrum
             cols_raw = [fits.Column(name='wavelength', format='E', array=lam_obs), fits.Column(name='flux', format='E', array=fnu_fiber)]
-            fits.BinTableHDU.from_columns(fits.ColDefs(cols_raw)).writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}_raw.fits"), overwrite=True)
+            hdu_raw = fits.BinTableHDU.from_columns(fits.ColDefs(cols_raw))
+            # Copy headers
+            hdu_raw.header['OBJECT'] = f"Subhalo {subhalo_id}"
+            hdu_raw.header['REDSHIFT'] = z_obs
+            hdu_raw.header['SUBHALO'] = subhalo_id
+            hdu_raw.header['MASS'] = stellar_mass
+            hdu_raw.header['PHI'] = phi
+            hdu_raw.header['THETA'] = theta
+            hdu_raw.header['SNAP'] = config['simulation']['snap_number']
+            hdu_raw.header['VELSHIFT'] = mod.get('vel_shift', False)
+
+            hdu_raw.writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}_raw.fits"), overwrite=True)
             
             # Convolved and Resampled
             lam_desi = np.arange(desi_conf['lam_min'], desi_conf['lam_max'] + desi_conf['d_lam'], desi_conf['d_lam'])

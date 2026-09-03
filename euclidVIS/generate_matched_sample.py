@@ -288,30 +288,21 @@ def main():
 
     grid, vis_filter, model = load_shared_resources(config)
     n_jobs = int(config["optimization"].get("n_jobs", 1))
-    # Keep all work for one snapshot together. The Parallel context keeps the
-    # worker pool alive between snapshot groups while each group benefits from
-    # parallel galaxy processing and filesystem/cache locality.
-    with Parallel(n_jobs=n_jobs) as parallel:
-        snapshot_groups = targets.groupby("snapshot", sort=False)
-        total_groups = targets["snapshot"].nunique()
-        for group_number, (snapshot, group) in enumerate(
-            snapshot_groups, start=1
-        ):
-            snapshot_redshift = group["snapshot_redshift"].iloc[0]
-            print(
-                f"Snapshot {int(snapshot)} (z={snapshot_redshift:.4f}): "
-                f"generating {len(group)} mocks "
-                f"[{group_number}/{total_groups}]",
-                flush=True,
-            )
-            results = parallel(
-                delayed(process_target)(
-                    row, config, grid, vis_filter, model
-                )
-                for row in group.itertuples(index=False)
-            )
-            for result in results:
-                print(result, flush=True)
+    # Targets are sorted by snapshot above for filesystem/cache locality, but
+    # all targets share one global queue. Workers may cross a snapshot boundary
+    # to avoid leaving cores idle when a snapshot contains fewer than n_jobs
+    # selected galaxies. Each worker still loads only its assigned subhalo.
+    print(
+        f"Generating {len(targets)} mocks from "
+        f"{targets['snapshot'].nunique()} snapshots with n_jobs={n_jobs}.",
+        flush=True,
+    )
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(process_target)(row, config, grid, vis_filter, model)
+        for row in targets.itertuples(index=False)
+    )
+    for result in results:
+        print(result, flush=True)
 
 
 if __name__ == "__main__":

@@ -165,12 +165,46 @@ def load_IllustrisTNG_fixed(
 
         # Load Gas
         gas_fields = ["StarFormationRate", "Coordinates", "Masses", "GFM_Metallicity", "SubfindHsml"]
-        out_gas = il.snapshot.loadSubhalo(directory, snap_number, idx, "gas", fields=gas_fields)
+        gas_hsml_from_density = False
+        try:
+            out_gas = il.snapshot.loadSubhalo(
+                directory, snap_number, idx, "gas", fields=gas_fields
+            )
+        except Exception as error:
+            if "SubfindHsml" not in str(error):
+                raise
+            # Some snapshots do not contain the optional SubfindHsml field for
+            # gas. Density is a native gas-cell field, so use the equivalent
+            # spherical cell radius, (3 M / 4 pi rho)^(1/3), as the kernel
+            # smoothing scale for the dust-column calculation.
+            print(
+                f"  INFO: Snapshot {snap_number} has no gas SubfindHsml; "
+                "deriving gas smoothing lengths from Masses/Density.",
+                flush=True,
+            )
+            gas_fields.remove("SubfindHsml")
+            gas_fields.append("Density")
+            out_gas = il.snapshot.loadSubhalo(
+                directory, snap_number, idx, "gas", fields=gas_fields
+            )
+            gas_hsml_from_density = True
         if out_gas["count"] > 0:
             g_masses = out_gas["Masses"]
             g_sfr = out_gas["StarFormationRate"]
             g_coods = out_gas["Coordinates"]
-            g_hsml = out_gas["SubfindHsml"]
+            if gas_hsml_from_density:
+                density = out_gas["Density"]
+                if np.any(density <= 0):
+                    raise ValueError(
+                        f"Snapshot {snap_number}, subhalo {idx} has "
+                        "non-positive gas density; cannot derive smoothing "
+                        "lengths"
+                    )
+                g_hsml = np.cbrt(
+                    3.0 * g_masses / (4.0 * np.pi * density)
+                )
+            else:
+                g_hsml = out_gas["SubfindHsml"]
             g_metals = out_gas["GFM_Metallicity"]
             g_masses = (g_masses * 1e10) / h
             star_forming = g_sfr > 0.0

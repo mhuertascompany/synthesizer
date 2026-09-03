@@ -3,7 +3,7 @@
 paths:
   tng_path: "/virgotng/universe/IllustrisTNG/TNG50-1/output"
   grid_dir: "/u/mhuertas/data/synthesizer"
-  output_path: "/u/mhuertas/data/euclid/tngmocks_matched"
+  output_path: "/u/mhuertas/data/euclid/tngmocks_matched_fullsnap"
   reference_catalog: "/u/mhuertas/data/euclid/reference/physical_properties_deep.fits"
   filter_file: "Euclid_VIS.vis.dat"
   euclid_subdir: "Euclid_raw_and_psf"
@@ -18,8 +18,9 @@ sample:
   log_mass_max: 13.0
   redshift_bin_width: 0.02
   mass_bin_width: 0.05
-  snapshot_min: 0
-  snapshot_max: 99
+  # TNG full snapshots in the selected 0 <= z <= 2 interval. Mini snapshots
+  # omit particle fields such as SubfindHsml.
+  allowed_snapshots: [33, 40, 50, 59, 67, 72, 78, 84, 91, 99]
   selection_manifest: "matched_sample.csv"
 
 simulation:

@@ -110,11 +110,22 @@ def discover_snapshots(tng_path, sample):
             if match:
                 snapshot_numbers.add(int(match.group(1)))
 
-    minimum = int(sample.get("snapshot_min", 0))
-    maximum = int(sample.get("snapshot_max", 99))
-    snapshot_numbers = sorted(
-        snap for snap in snapshot_numbers if minimum <= snap <= maximum
-    )
+    allowed_snapshots = sample.get("allowed_snapshots")
+    if allowed_snapshots is not None:
+        allowed_snapshots = {int(snapshot) for snapshot in allowed_snapshots}
+        missing = sorted(allowed_snapshots - snapshot_numbers)
+        if missing:
+            raise FileNotFoundError(
+                "Configured TNG snapshots are unavailable under "
+                f"{tng_path}: {missing}"
+            )
+        snapshot_numbers = sorted(snapshot_numbers & allowed_snapshots)
+    else:
+        minimum = int(sample.get("snapshot_min", 0))
+        maximum = int(sample.get("snapshot_max", 99))
+        snapshot_numbers = sorted(
+            snap for snap in snapshot_numbers if minimum <= snap <= maximum
+        )
     if not snapshot_numbers:
         raise FileNotFoundError(f"No TNG snapshots found under {tng_path}")
 

@@ -110,8 +110,25 @@ def load_IllustrisTNG_fixed(
 
         # Load Stars
         star_fields = ["GFM_StellarFormationTime", "Coordinates", "Masses", "GFM_InitialMass", "GFM_Metallicity", "SubfindHsml", "Velocities"]
-        if metals: star_fields.append("GFM_Metals")
-        out_stars = il.snapshot.loadSubhalo(directory, snap_number, idx, "stars", fields=star_fields)
+        try:
+            out_stars = il.snapshot.loadSubhalo(
+                directory, snap_number, idx, "stars", fields=star_fields
+            )
+        except Exception as error:
+            # SubfindHsml is absent for stellar particles in some TNG
+            # snapshots. It is not needed for the particle spectra or the
+            # histogram-based VIS image, so reload without it.
+            if "SubfindHsml" not in str(error):
+                raise
+            print(
+                f"  INFO: Snapshot {snap_number} has no stellar "
+                "SubfindHsml; continuing without stellar smoothing lengths.",
+                flush=True,
+            )
+            star_fields.remove("SubfindHsml")
+            out_stars = il.snapshot.loadSubhalo(
+                directory, snap_number, idx, "stars", fields=star_fields
+            )
         if out_stars["count"] > 0:
             mask = out_stars["GFM_StellarFormationTime"] <= 0.0
             imasses = out_stars["GFM_InitialMass"][~mask]
@@ -119,14 +136,19 @@ def load_IllustrisTNG_fixed(
             coods = out_stars["Coordinates"][~mask]
             metallicities = out_stars["GFM_Metallicity"][~mask]
             masses = out_stars["Masses"][~mask]
-            hsml = out_stars["SubfindHsml"][~mask]
+            hsml = (
+                out_stars["SubfindHsml"][~mask]
+                if "SubfindHsml" in out_stars
+                else None
+            )
             vels = out_stars["Velocities"][~mask] if "Velocities" in out_stars else None
             
             masses = (masses * 1e10) / h
             imasses = (imasses * 1e10) / h
             if physical:
                 coods *= (scale_factor / h) # Convert ckpc/h to kpc
-                hsml *= (scale_factor / h)
+                if hsml is not None:
+                    hsml *= (scale_factor / h)
                 # Velocities in TNG are km/s * sqrt(a), we want km/s
                 if vels is not None:
                     vels *= np.sqrt(scale_factor)
@@ -403,7 +425,11 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         metallicities=target_galaxy.stars.metallicities[sampled_indices],
         coordinates=target_galaxy.stars.coordinates[sampled_indices],
         current_masses=target_galaxy.stars.current_masses[sampled_indices],
-        smoothing_lengths=target_galaxy.stars.smoothing_lengths[sampled_indices],
+        smoothing_lengths=(
+            target_galaxy.stars.smoothing_lengths[sampled_indices]
+            if target_galaxy.stars.smoothing_lengths is not None
+            else None
+        ),
         velocities=target_galaxy.stars.velocities[sampled_indices] if target_galaxy.stars.velocities is not None else None,
         redshift=target_galaxy.stars.redshift,
         centre=target_galaxy.stars.centre
@@ -523,7 +549,11 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             metallicities=opt_stars.metallicities[i:end],
             coordinates=opt_stars.coordinates[i:end],
             current_masses=opt_stars.current_masses[i:end],
-            smoothing_lengths=opt_stars.smoothing_lengths[i:end],
+            smoothing_lengths=(
+                opt_stars.smoothing_lengths[i:end]
+                if opt_stars.smoothing_lengths is not None
+                else None
+            ),
             velocities=opt_stars.velocities[i:end] if opt_stars.velocities is not None else None,
             redshift=opt_stars.redshift,
             centre=opt_stars.centre
@@ -531,15 +561,20 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         # chunk_stars.parent = target_galaxy # REMOVED: Not needed and potentially disruptive
         chunk_tau_v = tau_v[i:end]
         
-        # get_particle_spectra for this chunk
+        # Generate per-particle spectra for this chunk.
         vel_shift = mod.get('vel_shift', False)
-        spectra_dict = chunk_stars.get_particle_spectra(
-            emission_model=model, 
-            tau_v=chunk_tau_v, 
-            nthreads=opt['nthreads_spectra'], 
-            vel_shift=vel_shift,
-            verbose=False
-        )
+        previous_per_particle = model.per_particle
+        model.set_per_particle(True)
+        try:
+            spectra_dict = chunk_stars.get_spectra(
+                emission_model=model,
+                tau_v=chunk_tau_v,
+                nthreads=opt['nthreads_spectra'],
+                vel_shift=vel_shift,
+                verbose=False
+            )
+        finally:
+            model.set_per_particle(previous_per_particle)
         particle_spectra = spectra_dict.get('attenuated', list(spectra_dict.values())[0]) if isinstance(spectra_dict, dict) else spectra_dict
         
         # --- DIAGNOSTIC: Check for H-alpha peak in young population ---

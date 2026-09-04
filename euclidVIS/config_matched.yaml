@@ -1,10 +1,10 @@
-# Euclid deep-field matched TNG50 mock sample
+# DESI DR1--Euclid DR1 DEEP matched TNG50 mock sample
 
 paths:
   tng_path: "/virgotng/universe/IllustrisTNG/TNG50-1/output"
   grid_dir: "/u/mhuertas/data/synthesizer"
-  output_path: "/u/mhuertas/data/euclid/tngmocks_matched_fullsnap"
-  reference_catalog: "/u/mhuertas/data/euclid/reference/physical_properties_deep.fits"
+  output_path: "/u/mhuertas/data/euclid/tngmatched_euclid_desi"
+  reference_catalog: "/u/mhuertas/data/euclid/reference/catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.1.fits"
   filter_file: "Euclid_VIS.vis.dat"
   euclid_subdir: "Euclid_raw_and_psf"
   desi_subdir: "DESI"
@@ -13,14 +13,21 @@ sample:
   n_mocks: 100
   seed: 42
   z_min: 0.0
-  z_max: 2.0
+  z_max: 1.5
   log_mass_min: 9.5
-  log_mass_max: 13.0
+  # Histogram ceiling only; this is above the catalog maximum and therefore
+  # does not impose an upper stellar-mass selection.
+  log_mass_max: 14.0
+  reference_redshift_column: "phz_pp_median_redshift"
+  reference_mass_column: "phz_pp_median_stellarmass"
+  reference_selection_column: "chosen_survey"
+  reference_selection_value: "DEEP"
   redshift_bin_width: 0.02
   mass_bin_width: 0.05
-  # TNG full snapshots in the selected 0 <= z <= 2 interval. Mini snapshots
-  # omit particle fields such as SubfindHsml.
-  allowed_snapshots: [33, 40, 50, 59, 67, 72, 78, 84, 91, 99]
+  # TNG full snapshots spanning the selected 0 <= z <= 1.5 interval. Snapshot
+  # 33 (z=2) is excluded because the reference selection stops at z=1.5. Mini
+  # snapshots omit particle fields such as SubfindHsml.
+  allowed_snapshots: [40, 50, 59, 67, 72, 78, 84, 91, 99]
   selection_manifest: "matched_sample.csv"
 
 simulation:

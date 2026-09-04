@@ -156,6 +156,7 @@ examples/cloudy/data/*
 # Private Euclid deep-field reference catalog and generated binary conversion
 euclidVIS/catalogs/physical properties deep-result.csv
 euclidVIS/catalogs/physical_properties_deep.fits
+euclidVIS/catalogs/catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.1.fits
 
 # Local Euclid tiles, generated mocks, and injection products
 euclidVIS/images/

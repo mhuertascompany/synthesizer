@@ -44,6 +44,10 @@ def parse_args():
 
 def reference_histogram(path, sample):
     """Stream the reference FITS catalog into a two-dimensional histogram."""
+    redshift_column = sample.get("reference_redshift_column", "REDSHIFT")
+    mass_column = sample.get("reference_mass_column", "LOGMSTAR")
+    selection_column = sample.get("reference_selection_column")
+    selection_value = sample.get("reference_selection_value")
     z_edges = np.arange(
         sample["z_min"],
         sample["z_max"] + sample["redshift_bin_width"],
@@ -60,16 +64,21 @@ def reference_histogram(path, sample):
         table = hdul[1].data
         for start in range(0, len(table), 1_000_000):
             stop = min(start + 1_000_000, len(table))
-            z = np.asarray(table["REDSHIFT"][start:stop])
-            mass = np.asarray(table["LOGMSTAR"][start:stop])
+            z = np.asarray(table[redshift_column][start:stop])
+            mass = np.asarray(table[mass_column][start:stop])
             valid = (
                 np.isfinite(z)
                 & np.isfinite(mass)
                 & (z >= sample["z_min"])
-                & (z <= sample["z_max"])
-                & (mass >= sample["log_mass_min"])
+                & (z < sample["z_max"])
+                & (mass > sample["log_mass_min"])
                 & (mass <= sample["log_mass_max"])
             )
+            if selection_column is not None:
+                values = np.char.strip(
+                    np.asarray(table[selection_column][start:stop]).astype(str)
+                )
+                valid &= values == str(selection_value)
             counts += np.histogram2d(
                 z[valid], mass[valid], bins=(z_edges, mass_edges)
             )[0].astype(np.int64)

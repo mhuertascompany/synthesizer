@@ -1,0 +1,22 @@
+#!/bin/bash -l
+# Usage:
+#   FEASIBGS_ROOT=/u/mhuertas/python/feasiBGS sbatch check_feasibgs.sb
+
+#SBATCH -J CHECK_FEASIBGS
+#SBATCH -o /u/mhuertas/data/synthesizer/logs/check_feasibgs.%j.out
+#SBATCH -e /u/mhuertas/data/synthesizer/logs/check_feasibgs.%j.err
+#SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=8000MB
+#SBATCH --time=00:20:00
+
+module purge
+module load anaconda/3/2023.03
+source /u/mhuertas/python/envs/synth/bin/activate
+
+FEASIBGS_ROOT="${FEASIBGS_ROOT:-/u/mhuertas/python/feasiBGS}"
+export PYTHONPATH="${FEASIBGS_ROOT}:${PYTHONPATH:-}"
+
+python3 ./check_feasibgs.py

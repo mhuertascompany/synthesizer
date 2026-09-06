@@ -30,7 +30,7 @@ model:
   kappa: 20.0
   dust_to_metal: 0.4
   dust_curve: "Calzetti2000"
-  vel_shift: false # Apply doppler shift to spectra
+  vel_shift: true # Apply particle line-of-sight Doppler shifts to spectra
 
 optimization:
   particle_limit: -1 # Set to null or -1 to disable limit (use all particles)
@@ -42,6 +42,19 @@ optimization:
 desi:
   enabled: true
   fiber_diameter_arcsec: 1.5
+  noise_model: "feasibgs"
+  exposure_time_seconds: 180.0
+  airmass: 1.1
+  seeing_arcsec: 1.1
+  sky_model: "bright"
+  moon_illumination: 0.7
+  moon_altitude_deg: 60.0
+  moon_separation_deg: 80.0
+  sun_altitude_deg: -30.0
+  sun_separation_deg: 180.0
+  sky_subtraction_error: 0.0
+  output_dlambda_angstrom: 0.8
+  noise_seed: 42
   output_name: "desi_spectrum.fits"
   lam_min: 3600.0
   lam_max: 9800.0

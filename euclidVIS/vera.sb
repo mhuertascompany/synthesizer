@@ -24,5 +24,9 @@ export OPENBLAS_NUM_THREADS=8
 # activate virtual environment
 source /u/mhuertas/python/envs/synth/bin/activate
 
+# feasiBGS is an optional source checkout; override FEASIBGS_ROOT if needed.
+FEASIBGS_ROOT="${FEASIBGS_ROOT:-/u/mhuertas/python/feasiBGS}"
+export PYTHONPATH="${FEASIBGS_ROOT}:${PYTHONPATH:-}"
+
 # Run the program with force_overwrite to start from scratch with metadata
 python3 ./generate_euclid_vis.py --force_overwrite

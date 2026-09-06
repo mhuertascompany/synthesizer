@@ -16,6 +16,10 @@ module purge
 module load anaconda/3/2023.03
 source /u/mhuertas/python/envs/synth/bin/activate
 
+# feasiBGS is an optional source checkout; override FEASIBGS_ROOT if needed.
+FEASIBGS_ROOT="${FEASIBGS_ROOT:-/u/mhuertas/python/feasiBGS}"
+export PYTHONPATH="${FEASIBGS_ROOT}:${PYTHONPATH:-}"
+
 export OMP_NUM_THREADS=8
 export MKL_NUM_THREADS=8
 export OPENBLAS_NUM_THREADS=8

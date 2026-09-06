@@ -26,6 +26,8 @@ from astropy.io import fits
 from astropy.cosmology import Planck15 as cosmo
 import astropy.units as u
 
+from desi_feasibgs import simulate_feasibgs_exposure
+
 
 MICROJY_CGS = 1e-29  # 1 microJy in erg / s / cm^2 / Hz
 
@@ -748,28 +750,54 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             hdu_raw.header['THETA'] = theta
             hdu_raw.header['SNAP'] = config['simulation']['snap_number']
             hdu_raw.header['VELSHIFT'] = mod.get('vel_shift', False)
+            hdu_raw.header['WAVEUNIT'] = 'Angstrom'
+            hdu_raw.header['BUNIT'] = 'erg/s/cm2/Hz'
+            hdu_raw.header['SPECTYPE'] = 'FNU'
 
             hdu_raw.writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}_raw.fits"), overwrite=True)
-            
-            # Convolved and Resampled
-            lam_desi = np.arange(desi_conf['lam_min'], desi_conf['lam_max'] + desi_conf['d_lam'], desi_conf['d_lam'])
-            fnu_interp = interp1d(lam_obs, fnu_fiber, bounds_error=False, fill_value=0.0)(lam_desi)
-            R_desi = desi_conf['R_min'] + (desi_conf['R_max'] - desi_conf['R_min']) * (lam_desi - desi_conf['lam_min']) / (desi_conf['lam_max'] - desi_conf['lam_min'])
-            fnu_conv = gaussian_filter1d(fnu_interp, sigma=np.mean((lam_desi / (2.355 * R_desi)) / desi_conf['d_lam']))
-            
-            cols_conv = [fits.Column(name='wavelength', format='E', array=lam_desi), fits.Column(name='flux', format='E', array=fnu_conv)]
-            hdu_desi = fits.BinTableHDU.from_columns(fits.ColDefs(cols_conv))
-            hdu_desi.header['REDSHIFT'] = z_obs
-            hdu_desi.header['SUBHALO'] = subhalo_id
-            hdu_desi.header['MASS'] = stellar_mass
-            hdu_desi.header['PHI'] = phi
-            hdu_desi.header['THETA'] = theta
-            hdu_desi.header['SNAP'] = config['simulation']['snap_number']
-            hdu_desi.header['KAPPA'] = mod['kappa']
-            hdu_desi.header['DTM'] = mod['dust_to_metal']
-            hdu_desi.header['CURVE'] = mod['dust_curve']
-            hdu_desi.header['VELSHIFT'] = mod.get('vel_shift', False)
-            hdu_desi.writeto(os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}.fits"), overwrite=True)
+
+            output_spectrum = os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}.fits")
+            noise_model = str(desi_conf.get('noise_model', 'gaussian')).lower()
+            if noise_model == 'feasibgs':
+                snap_number = int(config['simulation']['snap_number'])
+                base_seed = int(desi_conf.get('noise_seed', 42))
+                noise_seed = (base_seed + snap_number * 1000003 + int(subhalo_id)) % 4294967295
+                simulate_feasibgs_exposure(
+                    lam_obs,
+                    fnu_fiber,
+                    output_spectrum,
+                    desi_conf,
+                    noise_seed,
+                    metadata={
+                        'REDSHIFT': z_obs,
+                        'SUBHALO': int(subhalo_id),
+                        'MASS': stellar_mass,
+                        'PHI': phi,
+                        'THETA': theta,
+                        'SNAP': snap_number,
+                        'KAPPA': mod['kappa'],
+                        'DTM': mod['dust_to_metal'],
+                        'CURVE': mod['dust_curve'],
+                        'VELSHIFT': mod.get('vel_shift', False),
+                    },
+                )
+            elif noise_model == 'gaussian':
+                # Legacy resolution-only approximation (no detector/sky noise).
+                lam_desi = np.arange(desi_conf['lam_min'], desi_conf['lam_max'] + desi_conf['d_lam'], desi_conf['d_lam'])
+                fnu_interp = interp1d(lam_obs, fnu_fiber, bounds_error=False, fill_value=0.0)(lam_desi)
+                R_desi = desi_conf['R_min'] + (desi_conf['R_max'] - desi_conf['R_min']) * (lam_desi - desi_conf['lam_min']) / (desi_conf['lam_max'] - desi_conf['lam_min'])
+                fnu_conv = gaussian_filter1d(fnu_interp, sigma=np.mean((lam_desi / (2.355 * R_desi)) / desi_conf['d_lam']))
+                cols_conv = [fits.Column(name='wavelength', format='E', array=lam_desi), fits.Column(name='flux', format='E', array=fnu_conv)]
+                hdu_desi = fits.BinTableHDU.from_columns(fits.ColDefs(cols_conv))
+                hdu_desi.header['REDSHIFT'] = z_obs
+                hdu_desi.header['SUBHALO'] = subhalo_id
+                hdu_desi.header['MASS'] = stellar_mass
+                hdu_desi.header['WAVEUNIT'] = 'Angstrom'
+                hdu_desi.header['BUNIT'] = 'erg/s/cm2/Hz'
+                hdu_desi.header['SPECTYPE'] = 'FNU'
+                hdu_desi.writeto(output_spectrum, overwrite=True)
+            else:
+                raise ValueError("desi.noise_model must be 'feasibgs' or 'gaussian'")
             print(f"  DESI spectra saved to {desi_dir}", flush=True)
         else:
             print("  DESI WARNING: lnu_fiber_total is None! No stars in fiber?", flush=True)
@@ -796,10 +824,17 @@ def process_single_galaxy_wrapper(subhalo_id, config, grid, vis_filter, model):
         euclid_subdir = paths.get('euclid_subdir', 'Euclid')
         euclid_dir = os.path.join(paths['output_path'], f"sn{snap_number}", euclid_subdir)
         expected_file = os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}.fits")
+        expected_outputs = [expected_file]
+        if config.get('desi', {}).get('enabled', False):
+            desi_subdir = paths.get('desi_subdir', 'DESI')
+            expected_outputs.append(os.path.join(
+                paths['output_path'], f"sn{snap_number}", desi_subdir,
+                f"desi_spectrum_{subhalo_id}.fits",
+            ))
         
         force = config.get('optimization', {}).get('force_overwrite', False)
-        if os.path.exists(expected_file) and not force:
-             return f"Subhalo {subhalo_id}: SKIPPING (Output already exists)."
+        if all(os.path.exists(path) for path in expected_outputs) and not force:
+             return f"Subhalo {subhalo_id}: SKIPPING (All outputs already exist)."
 
         # Re-load just this galaxy within the worker
         # We use a dummy list for subhalo_ids to force loading just this one

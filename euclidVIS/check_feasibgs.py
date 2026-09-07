@@ -43,7 +43,7 @@ def main():
         "airmass": 1.1,
         "seeing_arcsec": 1.1,
         "sky_model": "dark",
-        "output_dlambda_angstrom": 0.8,
+        "output_dlambda_angstrom": 1.0,
     }
     with tempfile.TemporaryDirectory(prefix="feasibgs-smoke-") as tmpdir:
         output = Path(tmpdir) / "desi-smoke.fits"

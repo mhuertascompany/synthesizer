@@ -53,7 +53,7 @@ desi:
   sun_altitude_deg: -30.0
   sun_separation_deg: 180.0
   sky_subtraction_error: 0.0
-  output_dlambda_angstrom: 0.8
+  output_dlambda_angstrom: 1.0
   noise_seed: 42
   output_name: "desi_spectrum.fits"
   lam_min: 3600.0

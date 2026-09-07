@@ -92,7 +92,7 @@ def simulate_feasibgs_exposure(
             skyerr=float(config.get("sky_subtraction_error", 0.0)),
             Isky=isky,
             nonoise=bool(config.get("no_noise", False)),
-            dwave_out=float(config.get("output_dlambda_angstrom", 0.8)),
+            dwave_out=float(config.get("output_dlambda_angstrom", 1.0)),
             filename=temp_name,
         )
 

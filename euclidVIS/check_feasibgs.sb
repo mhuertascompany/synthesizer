@@ -18,5 +18,6 @@ source /u/mhuertas/python/envs/synth/bin/activate
 
 FEASIBGS_ROOT="${FEASIBGS_ROOT:-/u/mhuertas/python/feasiBGS}"
 export PYTHONPATH="${FEASIBGS_ROOT}:${PYTHONPATH:-}"
+export DESIMODEL="${DESIMODEL:-/u/mhuertas/data/desimodel}"
 
 python3 ./check_feasibgs.py

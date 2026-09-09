@@ -42,7 +42,13 @@ def main():
         "exposure_time_seconds": 10.0,
         "airmass": 1.1,
         "seeing_arcsec": 1.1,
-        "sky_model": "dark",
+        # Exercise the same feasiBGS compatibility path used in production.
+        "sky_model": "bright",
+        "moon_illumination": 0.7,
+        "moon_altitude_deg": 60.0,
+        "moon_separation_deg": 80.0,
+        "sun_altitude_deg": -30.0,
+        "sun_separation_deg": 180.0,
         "output_dlambda_angstrom": 1.0,
     }
     with tempfile.TemporaryDirectory(prefix="feasibgs-smoke-") as tmpdir:

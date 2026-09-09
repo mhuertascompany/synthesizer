@@ -159,4 +159,6 @@ euclidVIS/catalogs/physical_properties_deep.fits
 euclidVIS/catalogs/catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.1.fits
 
 # Local Euclid tiles, generated mocks, and injection products
+euclidVIS/merutils/
+euclidVIS/images/EUC_MER_CATALOG-PSF-VIS_*.fits
 euclidVIS/images/

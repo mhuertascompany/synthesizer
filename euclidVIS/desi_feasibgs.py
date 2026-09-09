@@ -29,6 +29,13 @@ def fnu_cgs_to_feasibgs_flambda(wavelength_angstrom, fnu_cgs):
 
 def _bright_sky(feasibgs_sky, config):
     """Return the feasiBGS refit-KS moon/twilight sky model."""
+    # feasiBGS calls the private compatibility helper
+    # ``specsim.config.is_string``. It was removed from newer specsim releases,
+    # although the equivalent check is simply isinstance(value, str).
+    import specsim.config
+
+    if not hasattr(specsim.config, "is_string"):
+        specsim.config.is_string = lambda value: isinstance(value, str)
     return feasibgs_sky.Isky_newKS_twi(
         float(config.get("airmass", 1.1)),
         float(config.get("moon_illumination", 0.7)),

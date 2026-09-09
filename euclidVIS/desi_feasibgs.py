@@ -36,13 +36,23 @@ def _bright_sky(feasibgs_sky, config):
 
     if not hasattr(specsim.config, "is_string"):
         specsim.config.is_string = lambda value: isinstance(value, str)
-    return feasibgs_sky.Isky_newKS_twi(
+    sky_wave, sky_brightness = feasibgs_sky.Isky_newKS_twi(
         float(config.get("airmass", 1.1)),
         float(config.get("moon_illumination", 0.7)),
         float(config.get("moon_altitude_deg", 60.0)),
         float(config.get("moon_separation_deg", 80.0)),
         float(config.get("sun_altitude_deg", -30.0)),
         float(config.get("sun_separation_deg", 180.0)),
+    )
+    # feasiBGS passes these directly to np.interp alongside wave.to_value().
+    # Newer Astropy versions reject mixing that unitless array with a Quantity.
+    if hasattr(sky_wave, "to_value"):
+        sky_wave = sky_wave.to_value("Angstrom")
+    if hasattr(sky_brightness, "value"):
+        sky_brightness = sky_brightness.value
+    return (
+        np.asarray(sky_wave, dtype=np.float64),
+        np.asarray(sky_brightness, dtype=np.float64),
     )
 
 

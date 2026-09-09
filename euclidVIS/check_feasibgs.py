@@ -32,7 +32,9 @@ def main():
     if args.imports_only:
         return
 
-    wave = np.arange(3500.0, 10001.0, 1.0)
+    # A logarithmic grid reproduces Synthesizer's nonuniform wavelength input.
+    # The adapter must resample this before passing it to desisim.
+    wave = np.geomspace(3500.0, 10000.0, 12000)
     # Construct a flat F_lambda=1e-17 spectrum through the inverse relation.
     fnu = 1e-17 * wave**2 / C_ANGSTROM_PER_SECOND
     converted = fnu_cgs_to_feasibgs_flambda(wave, fnu)
@@ -49,6 +51,7 @@ def main():
         "moon_separation_deg": 80.0,
         "sun_altitude_deg": -30.0,
         "sun_separation_deg": 180.0,
+        "input_dlambda_angstrom": 1.0,
         "output_dlambda_angstrom": 1.0,
     }
     with tempfile.TemporaryDirectory(prefix="feasibgs-smoke-") as tmpdir:

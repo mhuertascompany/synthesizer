@@ -46,6 +46,33 @@ def _bright_sky(feasibgs_sky, config):
     )
 
 
+def _resample_uniform_for_desi(wave, flux, config, desimodel_io):
+    """Resample one F_lambda spectrum to the uniform grid desisim requires."""
+    step = float(config.get("input_dlambda_angstrom", 0.1))
+    if not np.isfinite(step) or step <= 0:
+        raise ValueError("desi.input_dlambda_angstrom must be positive")
+
+    params = desimodel_io.load_desiparams()
+    desi_min = float(params["ccd"]["b"]["wavemin"])
+    desi_max = float(params["ccd"]["z"]["wavemax"])
+    if wave[0] > desi_min or wave[-1] < desi_max:
+        raise ValueError(
+            "Synthesizer spectrum does not cover the full DESI wavelength "
+            f"range {desi_min:.1f}-{desi_max:.1f} Angstrom; input covers "
+            f"{wave[0]:.1f}-{wave[-1]:.1f} Angstrom"
+        )
+
+    # Extend by one grid point because feasiBGS explicitly requires its input
+    # to bracket (not merely equal) the DESI camera limits.
+    grid_min = np.floor(desi_min / step) * step - step
+    grid_max = np.ceil(desi_max / step) * step + step
+    uniform_wave = grid_min + step * np.arange(
+        int(np.ceil((grid_max - grid_min) / step)) + 1, dtype=np.float64
+    )
+    uniform_flux = np.interp(uniform_wave, wave, flux)
+    return uniform_wave, uniform_flux
+
+
 def simulate_feasibgs_exposure(
     wavelength_angstrom,
     fnu_cgs,
@@ -58,6 +85,7 @@ def simulate_feasibgs_exposure(
     try:
         from feasibgs import forwardmodel as forwardmodel
         from feasibgs import skymodel as skymodel
+        import desimodel.io as desimodel_io
     except ImportError as error:
         raise ImportError(
             "The DESI noise_model is 'feasibgs', but feasiBGS or one of its "
@@ -70,6 +98,11 @@ def simulate_feasibgs_exposure(
     order = np.argsort(wave)
     wave = wave[order]
     flux = fnu_cgs_to_feasibgs_flambda(wave, fnu[order])
+    wave, unique_indices = np.unique(wave, return_index=True)
+    flux = flux[unique_indices]
+    wave, flux = _resample_uniform_for_desi(
+        wave, flux, config, desimodel_io
+    )
     flux = np.clip(flux, 0.0, None)[None, :]
 
     sky_name = str(config.get("sky_model", "bright")).lower()

@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 from astropy.io import fits
 
+from edr_empirical_noise import apply_noise_template
+
 
 C_ANGSTROM_PER_SECOND = 2.99792458e18
 FEASIBGS_FLUX_SCALE = 1e-17
@@ -132,6 +134,7 @@ def simulate_feasibgs_exposure(
     os.close(temp_handle)
     os.unlink(temp_name)
     try:
+        donor_path = config.get("empirical_noise_donor")
         spectra = simulator.simExposure(
             wave,
             flux,
@@ -141,10 +144,13 @@ def simulate_feasibgs_exposure(
             seed=int(seed),
             skyerr=float(config.get("sky_subtraction_error", 0.0)),
             Isky=isky,
-            nonoise=bool(config.get("no_noise", False)),
+            nonoise=bool(config.get("no_noise", False) or donor_path),
             dwave_out=float(config.get("output_dlambda_angstrom", 1.0)),
             filename=temp_name,
         )
+
+        if donor_path:
+            apply_noise_template(temp_name, donor_path, seed)
 
         # feasiBGS writes standard DESI extensions. Add mock provenance only
         # to the primary header so the DESI data model remains intact.
@@ -156,6 +162,11 @@ def simulate_feasibgs_exposure(
             header["EXPTIME"] = float(config.get("exposure_time_seconds", 180.0))
             header["AIRMASS"] = float(config.get("airmass", 1.1))
             header["SEEING"] = float(config.get("seeing_arcsec", 1.1))
+            if donor_path:
+                header["DONPROG"] = (
+                    str(config.get("empirical_noise_donor_program", "UNKNOWN"))[:8],
+                    "EDR noise donor program",
+                )
             for key, value in (metadata or {}).items():
                 header[key] = value
             hdul.flush()

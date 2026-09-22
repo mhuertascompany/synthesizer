@@ -162,3 +162,8 @@ euclidVIS/catalogs/catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.1.fits
 euclidVIS/merutils/
 euclidVIS/images/EUC_MER_CATALOG-PSF-VIS_*.fits
 euclidVIS/images/
+
+# Local AstroPT checkpoint and derived representations
+euclidVIS/astropt/ckpt*.pt
+euclidVIS/astropt/desi_inputs/
+euclidVIS/astropt/desi_embeddings*.npz

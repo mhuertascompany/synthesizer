@@ -1,5 +1,5 @@
 #!/bin/bash -l
-# Usage: sbatch vera_matched.sb [number_of_mocks] [seed]
+# Usage: sbatch vera_matched.sb [number_of_mocks] [seed] [input_manifest]
 # Example test: sbatch vera_matched.sb 10 42
 
 #SBATCH -J EUCLID_MATCHED
@@ -27,8 +27,15 @@ export OPENBLAS_NUM_THREADS=8
 
 N_MOCKS="${1:-100}"
 SEED="${2:-42}"
+INPUT_MANIFEST="${3:-}"
 
-python3 ./generate_matched_sample.py \
-    --config ./config_matched.yaml \
-    --n_mocks "${N_MOCKS}" \
+ARGS=(
+    --config ./config_matched.yaml
+    --n_mocks "${N_MOCKS}"
     --seed "${SEED}"
+)
+if [[ -n "${INPUT_MANIFEST}" ]]; then
+    ARGS+=(--input_manifest "${INPUT_MANIFEST}")
+fi
+
+python3 ./generate_matched_sample.py "${ARGS[@]}"

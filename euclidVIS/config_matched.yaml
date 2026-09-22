@@ -55,9 +55,16 @@ optimization:
 desi:
   enabled: true
   fiber_diameter_arcsec: 1.5
-  # feasiBGS produces standard noisy DESI B/R/Z spectra. Use "gaussian" to
-  # recover the previous resolution-only approximation.
-  noise_model: "feasibgs"
+  # feasiBGS supplies the DESI response/resolution; EDR donor IVAR and masks
+  # supply the empirical wavelength-dependent noise and coadd depth.
+  noise_model: "feasibgs_edr"
+  # These paths are on Vera. Select donors against the full archive on Teide,
+  # then transfer only the resulting donor FITS files into this directory.
+  edr_donor_catalog: "/u/mhuertas/data/euclid/reference/catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.0.fits"
+  edr_spectra_dir: "/u/mhuertas/data/euclid/edr_noise_donors/spectra"
+  donor_k_neighbors: 64
+  donor_redshift_scale: 0.05
+  donor_log_mass_scale: 0.2
   exposure_time_seconds: 180.0
   airmass: 1.1
   seeing_arcsec: 1.1

@@ -758,7 +758,9 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
 
             output_spectrum = os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}.fits")
             noise_model = str(desi_conf.get('noise_model', 'gaussian')).lower()
-            if noise_model == 'feasibgs':
+            if noise_model in {'feasibgs', 'feasibgs_edr'}:
+                if noise_model == 'feasibgs_edr' and not desi_conf.get('empirical_noise_donor'):
+                    raise ValueError('feasibgs_edr requires an assigned empirical_noise_donor')
                 snap_number = int(config['simulation']['snap_number'])
                 base_seed = int(desi_conf.get('noise_seed', 42))
                 noise_seed = (base_seed + snap_number * 1000003 + int(subhalo_id)) % 4294967295
@@ -797,7 +799,10 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
                 hdu_desi.header['SPECTYPE'] = 'FNU'
                 hdu_desi.writeto(output_spectrum, overwrite=True)
             else:
-                raise ValueError("desi.noise_model must be 'feasibgs' or 'gaussian'")
+                raise ValueError(
+                    "desi.noise_model must be 'feasibgs', 'feasibgs_edr', "
+                    "or 'gaussian'"
+                )
             print(f"  DESI spectra saved to {desi_dir}", flush=True)
         else:
             print("  DESI WARNING: lnu_fiber_total is None! No stars in fiber?", flush=True)

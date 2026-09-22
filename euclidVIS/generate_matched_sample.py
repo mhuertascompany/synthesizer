@@ -20,6 +20,7 @@ from synthesizer.emission_models.attenuation import Calzetti2000
 from synthesizer.grid import Grid
 from synthesizer.instruments.filters import Filter, FilterCollection
 
+from edr_empirical_noise import assign_noise_donors
 from generate_euclid_vis import process_single_galaxy_wrapper
 
 
@@ -34,9 +35,19 @@ def parse_args():
     parser.add_argument("--n_mocks", type=int)
     parser.add_argument("--seed", type=int)
     parser.add_argument(
+        "--input_manifest",
+        type=Path,
+        help="Reuse an existing target/subhalo/donor manifest exactly.",
+    )
+    parser.add_argument(
         "--selection_only",
         action="store_true",
         help="Write the matched manifest without generating spectra/images.",
+    )
+    parser.add_argument(
+        "--skip_donor_assignment",
+        action="store_true",
+        help="Write targets before EDR donors have been staged on this host.",
     )
     parser.add_argument("--force_overwrite", action="store_true")
     return parser.parse_args()
@@ -248,6 +259,14 @@ def process_target(row, base_config, grid, vis_filter, model):
     config["simulation"]["subhalo_ids"] = [int(row.subhalo_id)]
     config["observation"]["z_obs"] = float(row.target_redshift)
     config["observation"]["randomize_redshift"] = False
+    if hasattr(row, "noise_donor_path"):
+        config["desi"]["empirical_noise_donor"] = str(row.noise_donor_path)
+        config["desi"]["empirical_noise_donor_targetid"] = int(
+            row.noise_donor_targetid
+        )
+        config["desi"]["empirical_noise_donor_program"] = str(
+            row.noise_donor_program
+        )
     return process_single_galaxy_wrapper(
         int(row.subhalo_id), config, grid, vis_filter, model
     )
@@ -264,29 +283,72 @@ def main():
         raise ValueError("n_mocks must be positive")
     if args.force_overwrite:
         config["optimization"]["force_overwrite"] = True
-    rng = np.random.default_rng(seed)
-
-    print("Building the Euclid reference distribution...", flush=True)
-    counts, z_edges, mass_edges = reference_histogram(
-        config["paths"]["reference_catalog"], sample
-    )
-    targets = draw_targets(counts, z_edges, mass_edges, n_mocks, rng)
-    snapshots = discover_snapshots(config["paths"]["tng_path"], sample)
-    targets = assign_snapshots(targets, snapshots)
-    targets = choose_subhalos(
-        targets,
-        config["paths"]["tng_path"],
-        sample["log_mass_min"],
-        sample["mass_bin_width"],
-        rng,
-    )
-    targets.insert(0, "mock_id", np.arange(n_mocks))
-    targets["delta_log_mass"] = (
-        targets["tng_log_mass"] - targets["target_log_mass"]
-    )
-    targets["delta_redshift"] = (
-        targets["snapshot_redshift"] - targets["target_redshift"]
-    )
+    if args.input_manifest is not None:
+        targets = pd.read_csv(args.input_manifest)
+        required = {
+            "target_redshift",
+            "target_log_mass",
+            "snapshot",
+            "snapshot_redshift",
+            "subhalo_id",
+            "tng_log_mass",
+        }
+        missing = sorted(required - set(targets.columns))
+        if missing:
+            raise KeyError(f"Input manifest is missing columns: {missing}")
+        if args.n_mocks is not None and args.n_mocks != len(targets):
+            raise ValueError(
+                f"--n_mocks={args.n_mocks} but input manifest has "
+                f"{len(targets)} rows"
+            )
+        n_mocks = len(targets)
+        print(f"Reusing {n_mocks} targets from {args.input_manifest}", flush=True)
+    else:
+        rng = np.random.default_rng(seed)
+        print("Building the Euclid reference distribution...", flush=True)
+        counts, z_edges, mass_edges = reference_histogram(
+            config["paths"]["reference_catalog"], sample
+        )
+        targets = draw_targets(counts, z_edges, mass_edges, n_mocks, rng)
+        snapshots = discover_snapshots(config["paths"]["tng_path"], sample)
+        targets = assign_snapshots(targets, snapshots)
+        targets = choose_subhalos(
+            targets,
+            config["paths"]["tng_path"],
+            sample["log_mass_min"],
+            sample["mass_bin_width"],
+            rng,
+        )
+        targets.insert(0, "mock_id", np.arange(n_mocks))
+        targets["delta_log_mass"] = (
+            targets["tng_log_mass"] - targets["target_log_mass"]
+        )
+        targets["delta_redshift"] = (
+            targets["snapshot_redshift"] - targets["target_redshift"]
+        )
+    desi_config = config.get("desi", {})
+    if (
+        str(desi_config.get("noise_model", "gaussian")).lower()
+        == "feasibgs_edr"
+        and not args.skip_donor_assignment
+        and "noise_donor_path" not in targets.columns
+    ):
+        print("Assigning empirical EDR noise donors...", flush=True)
+        targets = assign_noise_donors(
+            targets,
+            desi_config["edr_donor_catalog"],
+            desi_config["edr_spectra_dir"],
+            sample,
+            desi_config,
+            seed=int(seed) + 190734863,
+        )
+        print(
+            targets.groupby("noise_donor_program")
+            .size()
+            .rename("n_donors")
+            .to_string(),
+            flush=True,
+        )
     targets = targets.sort_values(
         ["snapshot_redshift", "target_log_mass"],
         ascending=[True, True],
@@ -305,6 +367,23 @@ def main():
     )
     if args.selection_only:
         return
+
+    if (
+        str(desi_config.get("noise_model", "gaussian")).lower()
+        == "feasibgs_edr"
+    ):
+        if "noise_donor_path" not in targets.columns:
+            raise ValueError("No EDR donors assigned; remove --skip_donor_assignment")
+        missing_donors = [
+            path
+            for path in targets["noise_donor_path"].unique()
+            if not Path(path).is_file()
+        ]
+        if missing_donors:
+            preview = "\n".join(f"  {path}" for path in missing_donors[:10])
+            raise FileNotFoundError(
+                f"{len(missing_donors)} assigned EDR donor files are missing:\n{preview}"
+            )
 
     grid, vis_filter, model = load_shared_resources(config)
     n_jobs = int(config["optimization"].get("n_jobs", 1))

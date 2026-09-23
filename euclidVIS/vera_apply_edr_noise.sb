@@ -1,0 +1,52 @@
+#!/bin/bash -l
+# Apply EDR donor noise to existing noiseless DESI mock spectra on Vera.
+#
+# Usage:
+#   sbatch vera_apply_edr_noise.sb [manifest] [n_jobs] [limit]
+#
+# Example smoke test:
+#   sbatch vera_apply_edr_noise.sb \
+#     /u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise.csv 3 3
+
+#SBATCH -J DESI_EDR_NOISE
+#SBATCH -o /u/mhuertas/data/synthesizer/logs/desi_edr_noise.%j.out
+#SBATCH -e /u/mhuertas/data/synthesizer/logs/desi_edr_noise.%j.err
+#SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=9
+#SBATCH --mem=64000MB
+#SBATCH --time=04:00:00
+
+set -euo pipefail
+
+module purge
+module load anaconda/3/2023.03
+source /u/mhuertas/python/envs/synth/bin/activate
+
+FEASIBGS_ROOT="${FEASIBGS_ROOT:-/u/mhuertas/python/feasiBGS}"
+export PYTHONPATH="${FEASIBGS_ROOT}:${PYTHONPATH:-}"
+export DESIMODEL="${DESIMODEL:-/u/mhuertas/data/desimodel}"
+
+# Each process worker runs one independent spectrum. Keep numerical libraries
+# single-threaded to avoid oversubscribing the allocated cores.
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+
+MANIFEST="${1:-/u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise.csv}"
+N_JOBS="${2:-9}"
+LIMIT="${3:-}"
+
+ARGS=(
+    --config ./config_matched.yaml
+    --manifest "${MANIFEST}"
+    --n-jobs "${N_JOBS}"
+    --overwrite
+    --backup-existing
+)
+if [[ -n "${LIMIT}" ]]; then
+    ARGS+=(--limit "${LIMIT}")
+fi
+
+python3 ./apply_edr_noise_to_existing_mocks.py "${ARGS[@]}"

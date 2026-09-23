@@ -105,6 +105,32 @@ Vera, extract the spectra into:
 
 ## 4. Generate the mocks from the exact assigned manifest
 
+If the noiseless `desi_spectrum_<subhalo>_raw.fits` products already exist,
+do not regenerate the TNG galaxies or Euclid images. Apply feasiBGS response
+and empirical donor noise as a post-processing step instead. First run a
+three-spectrum smoke test on Vera:
+
+```bash
+sbatch vera_apply_edr_noise.sb \
+  /u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise.csv 3 3
+```
+
+The second argument is the number of parallel workers and the third is the
+number of manifest rows to process. Inspect the job log and output headers,
+then run the complete manifest with nine workers:
+
+```bash
+sbatch vera_apply_edr_noise.sb \
+  /u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise.csv 9
+```
+
+The raw products are never modified. Before replacing an existing final
+`desi_spectrum_<subhalo>.fits`, the job saves it once as
+`desi_spectrum_<subhalo>.pre_edr.fits`.
+
+Only use the complete generation job below when a raw spectrum is missing or
+the underlying galaxy spectrum itself must be regenerated.
+
 ```bash
 sbatch vera_matched.sb 100 42 \
   /u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise.csv

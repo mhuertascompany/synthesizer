@@ -1,0 +1,76 @@
+#!/bin/bash -l
+# Assign empirical DESI EDR noise donors on TeideHPC.
+#
+# Usage:
+#   sbatch teide_edr_donors.sb [targets_csv] [output_directory] [seed]
+#
+# With no arguments, both the input and outputs use:
+#   /home/mhuertas/iac18_mhuertas_shared/mhuertas/euclid_desi_mocks
+
+#SBATCH -J EDR_DONORS
+#SBATCH -p express
+#SBATCH -N 1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=8G
+#SBATCH --time=01:00:00
+#SBATCH -o edr_donors.%j.out
+#SBATCH -e edr_donors.%j.err
+#SBATCH -D .
+
+set -euo pipefail
+
+module purge
+module load Miniconda3/23.5.2-0
+
+SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"
+DEFAULT_OUTPUT_DIR="/home/mhuertas/iac18_mhuertas_shared/mhuertas/euclid_desi_mocks"
+TARGETS="${1:-${DEFAULT_OUTPUT_DIR}/matched_sample.csv}"
+OUTPUT_DIR="${2:-${DEFAULT_OUTPUT_DIR}}"
+SEED="${3:-190734905}"
+
+CATALOG="/home/mhuertas/iac18_aasensio_shared/euclid_dr1/catalog/catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.0.fits"
+SPECTRA_DIR="/home/mhuertas/iac18_aasensio_shared/euclid_dr1/spectra"
+ENV_DIR="/home/mhuertas/.conda/envs/edr-noise"
+VERA_DONOR_DIR="/u/mhuertas/data/euclid/edr_noise_donors/spectra"
+
+if [[ ! -f "${TARGETS}" ]]; then
+    echo "ERROR: target manifest not found: ${TARGETS}" >&2
+    exit 2
+fi
+if [[ ! -f "${CATALOG}" ]]; then
+    echo "ERROR: EDR catalog not found: ${CATALOG}" >&2
+    exit 2
+fi
+if [[ ! -d "${SPECTRA_DIR}" ]]; then
+    echo "ERROR: EDR spectra directory not found: ${SPECTRA_DIR}" >&2
+    exit 2
+fi
+
+mkdir -p "${OUTPUT_DIR}"
+
+# Build the small reusable environment on the compute node. Directly invoking
+# its Python avoids relying on conda shell activation in a non-interactive job.
+if [[ ! -x "${ENV_DIR}/bin/python" ]]; then
+    conda create --yes --prefix "${ENV_DIR}" \
+        python=3.10 numpy pandas scipy astropy
+fi
+if ! "${ENV_DIR}/bin/python" -c "import numpy, pandas, scipy, astropy"; then
+    conda install --yes --prefix "${ENV_DIR}" numpy pandas scipy astropy
+fi
+
+cd "${SCRIPT_DIR}"
+echo "Running on $(hostname)"
+echo "Targets: ${TARGETS}"
+echo "Output:  ${OUTPUT_DIR}/matched_sample_edr_noise.csv"
+
+srun "${ENV_DIR}/bin/python" ./edr_empirical_noise.py \
+    --targets "${TARGETS}" \
+    --catalog "${CATALOG}" \
+    --spectra-dir "${SPECTRA_DIR}" \
+    --output "${OUTPUT_DIR}/matched_sample_edr_noise.csv" \
+    --copy-list "${OUTPUT_DIR}/edr_donor_files.txt" \
+    --assigned-spectra-dir "${VERA_DONOR_DIR}" \
+    --seed "${SEED}"
+
+echo "Donor assignment completed."

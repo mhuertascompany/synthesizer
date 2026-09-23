@@ -28,9 +28,21 @@ Copy that small CSV to Teide.
 
 ## 2. Assign donors on Teide
 
-Submit the Teide batch job from the `euclidVIS` directory of the same code
-revision. The job creates a small reusable Conda environment on a compute node
-and writes both output files alongside the input manifest:
+Teide compute nodes do not have internet access, so create the small reusable
+environment once on a login node. Store it in the shared project area rather
+than the limited home filesystem:
+
+```bash
+module purge
+module load Miniconda3/23.5.2-0
+conda create --yes \
+  --prefix /home/mhuertas/iac18_mhuertas_shared/mhuertas/euclid_desi_mocks/envs/edr-noise \
+  python=3.10 numpy pandas scipy astropy
+```
+
+Then submit the Teide batch job from the `euclidVIS` directory of the same code
+revision. The job only reads the prepared environment and writes both output
+files alongside the input manifest:
 
 ```bash
 sbatch teide_edr_donors.sb

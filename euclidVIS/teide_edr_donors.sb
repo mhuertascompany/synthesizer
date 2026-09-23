@@ -31,7 +31,7 @@ SEED="${3:-190734905}"
 
 CATALOG="/home/mhuertas/iac18_aasensio_shared/euclid_dr1/catalog/catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.0.fits"
 SPECTRA_DIR="/home/mhuertas/iac18_aasensio_shared/euclid_dr1/spectra"
-ENV_DIR="/home/mhuertas/.conda/envs/edr-noise"
+ENV_DIR="${DEFAULT_OUTPUT_DIR}/envs/edr-noise"
 VERA_DONOR_DIR="/u/mhuertas/data/euclid/edr_noise_donors/spectra"
 
 if [[ ! -f "${TARGETS}" ]]; then
@@ -49,14 +49,18 @@ fi
 
 mkdir -p "${OUTPUT_DIR}"
 
-# Build the small reusable environment on the compute node. Directly invoking
-# its Python avoids relying on conda shell activation in a non-interactive job.
+# Teide compute nodes do not have internet access. The environment must be
+# created once on a login node before submitting this job (see the workflow
+# documentation). Directly invoking its Python avoids shell-activation issues.
 if [[ ! -x "${ENV_DIR}/bin/python" ]]; then
-    conda create --yes --prefix "${ENV_DIR}" \
-        python=3.10 numpy pandas scipy astropy
+    echo "ERROR: Conda environment not found: ${ENV_DIR}" >&2
+    echo "Create it on a Teide login node before submitting this job." >&2
+    exit 2
 fi
 if ! "${ENV_DIR}/bin/python" -c "import numpy, pandas, scipy, astropy"; then
-    conda install --yes --prefix "${ENV_DIR}" numpy pandas scipy astropy
+    echo "ERROR: ${ENV_DIR} is missing one or more required packages." >&2
+    echo "Install numpy, pandas, scipy, and astropy on a login node." >&2
+    exit 2
 fi
 
 cd "${SCRIPT_DIR}"

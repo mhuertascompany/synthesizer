@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import warnings
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -59,17 +60,21 @@ def named_column(data, name):
 
 
 def read_observed(path):
-    with fits.open(path, memmap=False) as hdul:
-        table_hdu = next(
-            hdu
-            for hdu in hdul[1:]
-            if getattr(hdu.data, "names", None)
-            and "WAVELENGTH" in {name.upper() for name in hdu.data.names}
-        )
-        wave = named_column(table_hdu.data, "WAVELENGTH").astype(float)
-        flux = named_column(table_hdu.data, "FLUX").astype(float)
-        ivar = named_column(table_hdu.data, "IVAR").astype(float)
-        mask = named_column(table_hdu.data, "MASK")
+    # The compact EDR exports have a known incorrect NAXIS1 keyword but their
+    # WAVELENGTH/FLUX/IVAR/MASK arrays are complete and internally consistent.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="File may have been truncated")
+        with fits.open(path, memmap=False) as hdul:
+            table_hdu = next(
+                hdu
+                for hdu in hdul[1:]
+                if getattr(hdu.data, "names", None)
+                and "WAVELENGTH" in {name.upper() for name in hdu.data.names}
+            )
+            wave = named_column(table_hdu.data, "WAVELENGTH").astype(float)
+            flux = named_column(table_hdu.data, "FLUX").astype(float)
+            ivar = named_column(table_hdu.data, "IVAR").astype(float)
+            mask = named_column(table_hdu.data, "MASK")
     good = (
         np.isfinite(wave)
         & np.isfinite(flux)

@@ -171,19 +171,31 @@ def assign_snapshots(targets, snapshots):
     return targets
 
 
-def choose_subhalos(targets, tng_path, mass_floor, mass_bin_width, rng):
+def choose_subhalos(
+    targets,
+    tng_path,
+    mass_floor,
+    mass_bin_width,
+    rng,
+    log_ssfr_floor=-13.0,
+):
     """Match target masses to unique resolved subhalos in each snapshot."""
     targets["subhalo_id"] = -1
     targets["tng_log_mass"] = np.nan
+    targets["tng_sfr_msun_per_year"] = np.nan
+    targets["tng_log_sfr"] = np.nan
+    targets["tng_log_ssfr"] = np.nan
 
     for snapshot, indices in targets.groupby("snapshot").groups.items():
         header = il.groupcat.loadHeader(tng_path, int(snapshot))
         hubble = float(header["HubbleParam"])
-        mass_type = il.groupcat.loadSubhalos(
-            tng_path, int(snapshot), fields=["SubhaloMassType"]
+        subhalos = il.groupcat.loadSubhalos(
+            tng_path,
+            int(snapshot),
+            fields=["SubhaloMassType", "SubhaloSFR"],
         )
-        if isinstance(mass_type, dict):
-            mass_type = mass_type["SubhaloMassType"]
+        mass_type = subhalos["SubhaloMassType"]
+        subhalo_sfr = np.asarray(subhalos["SubhaloSFR"], dtype=float)
         stellar_mass = mass_type[:, 4] * 1e10 / hubble
         log_mass = np.full(stellar_mass.shape, -np.inf, dtype=float)
         positive = stellar_mass > 0
@@ -219,6 +231,14 @@ def choose_subhalos(targets, tng_path, mass_floor, mass_bin_width, rng):
                 nonempty_bins.remove(selected_bin)
             targets.at[index, "subhalo_id"] = subhalo
             targets.at[index, "tng_log_mass"] = log_mass[subhalo]
+            sfr = max(float(subhalo_sfr[subhalo]), 0.0)
+            log_ssfr = max(
+                np.log10(sfr / stellar_mass[subhalo]) if sfr > 0 else -np.inf,
+                float(log_ssfr_floor),
+            )
+            targets.at[index, "tng_sfr_msun_per_year"] = sfr
+            targets.at[index, "tng_log_ssfr"] = log_ssfr
+            targets.at[index, "tng_log_sfr"] = log_ssfr + log_mass[subhalo]
     return targets
 
 
@@ -318,6 +338,7 @@ def main():
             sample["log_mass_min"],
             sample["mass_bin_width"],
             rng,
+            log_ssfr_floor=sample.get("log_ssfr_floor", -13.0),
         )
         targets.insert(0, "mock_id", np.arange(n_mocks))
         targets["delta_log_mass"] = (

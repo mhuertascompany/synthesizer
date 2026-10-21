@@ -1,0 +1,28 @@
+#!/bin/bash -l
+# Add TNG sSFR and synthetic fiber r flux to an existing matched manifest.
+#
+# Usage: sbatch vera_measure_mock_properties.sb [input_manifest] [output_manifest]
+
+#SBATCH -J MOCK_PROPERTIES
+#SBATCH -o /u/mhuertas/data/synthesizer/logs/mock_properties.%j.out
+#SBATCH -e /u/mhuertas/data/synthesizer/logs/mock_properties.%j.err
+#SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=16000MB
+#SBATCH --time=01:00:00
+
+set -euo pipefail
+
+module purge
+module load anaconda/3/2023.03
+source /u/mhuertas/python/envs/synth/bin/activate
+
+INPUT_MANIFEST="${1:-/u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise.csv}"
+OUTPUT_MANIFEST="${2:-/u/mhuertas/data/euclid/edr_noise_donors/matched_sample_mock_properties.csv}"
+
+python3 ./measure_mock_matching_properties.py \
+    --config ./config_matched.yaml \
+    --manifest "${INPUT_MANIFEST}" \
+    --output "${OUTPUT_MANIFEST}"

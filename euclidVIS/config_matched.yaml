@@ -24,6 +24,9 @@ sample:
   reference_selection_value: "DEEP"
   redshift_bin_width: 0.02
   mass_bin_width: 0.05
+  # Zero-SFR TNG galaxies are represented by this specific-SFR floor when
+  # matching against SED-derived observed SFRs.
+  log_ssfr_floor: -13.0
   # TNG full snapshots spanning the selected 0 <= z <= 1.5 interval. Snapshot
   # 33 (z=2) is excluded because the reference selection stops at z=1.5. Mini
   # snapshots omit particle fields such as SubfindHsml.
@@ -65,6 +68,14 @@ desi:
   donor_k_neighbors: 64
   donor_redshift_scale: 0.05
   donor_log_mass_scale: 0.2
+  donor_match_ssfr: true
+  donor_log_ssfr_scale: 0.6
+  donor_log_ssfr_floor: -13.0
+  donor_log_ssfr_ceiling: -8.0
+  # The mock value is a 5600-7000 A fiber-spectrum proxy, while catalog
+  # FLUX_R is total photometry, so use a deliberately broad 0.4 dex scale.
+  donor_match_flux: true
+  donor_log_flux_scale: 0.4
   exposure_time_seconds: 180.0
   airmass: 1.1
   seeing_arcsec: 1.1

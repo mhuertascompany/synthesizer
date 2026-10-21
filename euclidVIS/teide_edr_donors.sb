@@ -25,7 +25,7 @@ module load Miniconda3/23.5.2-0
 
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"
 DEFAULT_OUTPUT_DIR="/home/mhuertas/iac18_mhuertas_shared/mhuertas/euclid_desi_mocks"
-TARGETS="${1:-${DEFAULT_OUTPUT_DIR}/matched_sample.csv}"
+TARGETS="${1:-${DEFAULT_OUTPUT_DIR}/matched_sample_mock_properties.csv}"
 OUTPUT_DIR="${2:-${DEFAULT_OUTPUT_DIR}}"
 SEED="${3:-190734905}"
 
@@ -66,15 +66,19 @@ fi
 cd "${SCRIPT_DIR}"
 echo "Running on $(hostname)"
 echo "Targets: ${TARGETS}"
-echo "Output:  ${OUTPUT_DIR}/matched_sample_edr_noise.csv"
+echo "Output:  ${OUTPUT_DIR}/matched_sample_edr_noise_flux_sfr.csv"
 
 srun "${ENV_DIR}/bin/python" ./edr_empirical_noise.py \
     --targets "${TARGETS}" \
     --catalog "${CATALOG}" \
     --spectra-dir "${SPECTRA_DIR}" \
-    --output "${OUTPUT_DIR}/matched_sample_edr_noise.csv" \
-    --copy-list "${OUTPUT_DIR}/edr_donor_files.txt" \
+    --output "${OUTPUT_DIR}/matched_sample_edr_noise_flux_sfr.csv" \
+    --copy-list "${OUTPUT_DIR}/edr_donor_files_flux_sfr.txt" \
     --assigned-spectra-dir "${VERA_DONOR_DIR}" \
+    --match-ssfr \
+    --match-flux \
+    --log-ssfr-scale 0.6 \
+    --log-flux-scale 0.4 \
     --seed "${SEED}"
 
 echo "Donor assignment completed."

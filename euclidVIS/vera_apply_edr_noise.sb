@@ -6,7 +6,7 @@
 #
 # Example smoke test:
 #   sbatch vera_apply_edr_noise.sb \
-#     /u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise.csv 3 3
+#     /u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise_flux_sfr.csv 3 3
 
 #SBATCH -J DESI_EDR_NOISE
 #SBATCH -o /u/mhuertas/data/synthesizer/logs/desi_edr_noise.%j.out
@@ -34,7 +34,7 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 
-MANIFEST="${1:-/u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise.csv}"
+MANIFEST="${1:-/u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise_flux_sfr.csv}"
 N_JOBS="${2:-9}"
 LIMIT="${3:-}"
 

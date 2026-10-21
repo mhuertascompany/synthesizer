@@ -24,7 +24,18 @@ This writes:
 /u/mhuertas/data/euclid/tngmatched_euclid_desi/matched_sample.csv
 ```
 
-Copy that small CSV to Teide.
+Once the noiseless raw spectra exist, enrich the manifest with TNG specific
+SFR and an r-like fiber flux measured directly from each raw spectrum:
+
+```bash
+sbatch vera_measure_mock_properties.sb \
+  /u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise.csv \
+  /u/mhuertas/data/euclid/edr_noise_donors/matched_sample_mock_properties.csv
+```
+
+This reads only the `SubhaloSFR` group-catalog field and existing raw spectra;
+it does not reload particles or regenerate any mock. Copy
+`matched_sample_mock_properties.csv` to Teide.
 
 ## 2. Assign donors on Teide
 
@@ -51,14 +62,14 @@ sbatch teide_edr_donors.sb
 The defaults assume the input manifest is:
 
 ```text
-/home/mhuertas/iac18_mhuertas_shared/mhuertas/euclid_desi_mocks/matched_sample.csv
+/home/mhuertas/iac18_mhuertas_shared/mhuertas/euclid_desi_mocks/matched_sample_mock_properties.csv
 ```
 
 An alternative manifest, output directory, and seed can be supplied as the
 three positional arguments:
 
 ```bash
-sbatch teide_edr_donors.sb /path/to/matched_sample.csv /path/to/output 190734905
+sbatch teide_edr_donors.sb /path/to/matched_sample_mock_properties.csv /path/to/output 190734905
 ```
 
 The equivalent direct Python command, for an already prepared compute-node
@@ -66,23 +77,32 @@ environment, is:
 
 ```bash
 python3 edr_empirical_noise.py \
-  --targets /path/to/matched_sample.csv \
+  --targets /path/to/matched_sample_mock_properties.csv \
   --catalog /home/mhuertas/iac18_aasensio_shared/euclid_dr1/catalog/catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.0.fits \
   --spectra-dir /home/mhuertas/iac18_aasensio_shared/euclid_dr1/spectra \
-  --output /path/to/matched_sample_edr_noise.csv \
-  --copy-list /path/to/edr_donor_files.txt \
+  --output /path/to/matched_sample_edr_noise_flux_sfr.csv \
+  --copy-list /path/to/edr_donor_files_flux_sfr.txt \
   --assigned-spectra-dir /u/mhuertas/data/euclid/edr_noise_donors/spectra \
+  --match-ssfr \
+  --match-flux \
+  --log-ssfr-scale 0.6 \
+  --log-flux-scale 0.4 \
   --seed 190734905
 ```
 
 The selector keeps DEEP galaxies with valid spectra, `PROGRAM` equal to
 `bright` or `dark`, `0 <= z < 1.5`, and `log(M*) > 9.5`. For each mock it
-queries the 64 nearest donors in redshift and stellar mass, makes a seeded
-random choice weighted by distance, and avoids reusing donors when possible.
+queries the 64 nearest donors in redshift, stellar mass, clipped specific SFR,
+and log r-band flux, makes a seeded random choice weighted by distance, and
+avoids reusing donors when possible. The SFR term separates quiescent and
+star-forming galaxies. The flux term uses a deliberately broad scale because
+the mock value comes from the 1.5-arcsec fiber spectrum while catalog
+`FLUX_R` is total photometry.
 
 The output manifest records the donor TARGETID, program, survey, redshift,
-stellar mass, r-band flux, per-arm S/N, and final Vera path. The text file
-contains the source Teide paths that need to be transferred.
+stellar mass, SFR, specific SFR, r-band flux, per-arm S/N, match offsets, and
+final Vera path. The text file contains the source Teide paths that need to be
+transferred.
 
 ## 3. Stage the selected spectra on Teide
 
@@ -90,14 +110,14 @@ contains the source Teide paths that need to be transferred.
 mkdir -p /path/to/selected_edr_donors
 while IFS= read -r spectrum; do
   cp -p "$spectrum" /path/to/selected_edr_donors/
-done < /path/to/edr_donor_files.txt
+done < /path/to/edr_donor_files_flux_sfr.txt
 
 tar -C /path/to/selected_edr_donors \
   -czf /path/to/selected_edr_donors.tar.gz .
 ```
 
-Transfer both `matched_sample_edr_noise.csv` and the tar archive to Vera. On
-Vera, extract the spectra into:
+Transfer both `matched_sample_edr_noise_flux_sfr.csv` and the tar archive to
+Vera. On Vera, extract the spectra into:
 
 ```text
 /u/mhuertas/data/euclid/edr_noise_donors/spectra
@@ -112,7 +132,7 @@ three-spectrum smoke test on Vera:
 
 ```bash
 sbatch vera_apply_edr_noise.sb \
-  /u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise.csv 3 3
+  /u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise_flux_sfr.csv 3 3
 ```
 
 The second argument is the number of parallel workers and the third is the
@@ -121,7 +141,7 @@ then run the complete manifest with nine workers:
 
 ```bash
 sbatch vera_apply_edr_noise.sb \
-  /u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise.csv 9
+  /u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise_flux_sfr.csv 9
 ```
 
 The raw products are never modified. Before replacing an existing final
@@ -133,7 +153,7 @@ the underlying galaxy spectrum itself must be regenerated.
 
 ```bash
 sbatch vera_matched.sb 100 42 \
-  /u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise.csv
+  /u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise_flux_sfr.csv
 ```
 
 feasiBGS is run without stochastic noise so it still supplies the DESI

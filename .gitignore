@@ -167,3 +167,6 @@ euclidVIS/images/
 euclidVIS/astropt/ckpt*.pt
 euclidVIS/astropt/desi_inputs/
 euclidVIS/astropt/desi_embeddings*.npz
+
+# Temporary local presentation build files
+.codex_deck_build/

@@ -540,17 +540,39 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     # Pre-calculate global coordinates and fiber mask
     coords_for_img = opt_stars.coordinates
     r_arcsec = np.sqrt(coords_for_img[:, 0].to(kpc).value**2 + coords_for_img[:, 1].to(kpc).value**2) / scale_kpc_per_arcsec
+    global_young_mask = opt_stars.ages.to('Myr').value < 10.0
+    num_global_young = int(np.sum(global_young_mask))
+    young_mass_fov = float(
+        np.sum(opt_stars.initial_masses[global_young_mask]).to(Msun).value
+    )
+    sfr_10myr_fov = young_mass_fov / 1.0e7
     
     desi_mask_global = None
+    num_in_fiber = 0
+    young_in_fiber = 0
+    sfr_10myr_fiber = 0.0
+    fiber_radius_arcsec = 0.0
     desi_enabled = desi_conf.get('enabled', False)
     if desi_enabled:
-        desi_mask_global = r_arcsec <= (desi_conf['fiber_diameter_arcsec'] / 2.0)
-        num_in_fiber = np.sum(desi_mask_global)
+        fiber_radius_arcsec = desi_conf['fiber_diameter_arcsec'] / 2.0
+        desi_mask_global = r_arcsec <= fiber_radius_arcsec
+        num_in_fiber = int(np.sum(desi_mask_global))
         
         # Count young stars in fiber
-        young_in_fiber = np.sum(desi_mask_global & (opt_stars.ages.to('Myr').value < 10.0))
+        young_fiber_mask = desi_mask_global & global_young_mask
+        young_in_fiber = int(np.sum(young_fiber_mask))
+        young_mass_fiber = float(
+            np.sum(opt_stars.initial_masses[young_fiber_mask]).to(Msun).value
+        )
+        sfr_10myr_fiber = young_mass_fiber / 1.0e7
         
         print(f"  DESI FIBER DIAGNOSTIC: {num_in_fiber} total stars, {young_in_fiber} young stars (<10 Myr) in fiber.", flush=True)
+        print(
+            "  DESI FIBER DIAGNOSTIC: "
+            f"SFR_10Myr={sfr_10myr_fiber:.4g} Msun/yr "
+            f"inside r={fiber_radius_arcsec:.3f} arcsec.",
+            flush=True,
+        )
         if num_in_fiber > 0:
             print(f"  DESI FIBER DIAGNOSTIC: r_arcsec range in fiber: {np.min(r_arcsec[desi_mask_global]):.3f} to {np.max(r_arcsec[desi_mask_global]):.3f}", flush=True)
         else:
@@ -570,9 +592,12 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     print(f"  Calculating spectra in chunks of {chunk_size} (total {num_stars} stars)...", flush=True)
 
     # --- GLOBAL DIAGNOSTIC: Count all young stars in FOV ---
-    global_young_mask = (opt_stars.ages.to('Myr').value < 10.0)
-    num_global_young = np.sum(global_young_mask)
     print(f"  GLOBAL DIAGNOSTIC: Found {num_global_young} young stars (<10 Myr) in the FOV.", flush=True)
+    print(
+        f"  GLOBAL DIAGNOSTIC: SFR_10Myr={sfr_10myr_fov:.4g} Msun/yr "
+        "from young stellar particles in the FOV.",
+        flush=True,
+    )
 
     for i in range(0, num_stars, chunk_size):
         end = min(i + chunk_size, num_stars)
@@ -678,6 +703,41 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     
     print("  Chunked calculation complete.", flush=True)
 
+    fiber_line_ratios = {}
+    if lnu_fiber_total is not None:
+        lam_rest = lam_obs / (1 + z_obs)
+        fiber_lnu = lnu_fiber_total.to('erg/s/Hz').value
+
+        def line_peak_to_continuum(rest_wavelength):
+            line_mask = np.abs(lam_rest - rest_wavelength) <= 12.0
+            continuum_mask = (
+                ((lam_rest >= rest_wavelength - 100.0)
+                 & (lam_rest <= rest_wavelength - 30.0))
+                | ((lam_rest >= rest_wavelength + 30.0)
+                   & (lam_rest <= rest_wavelength + 100.0))
+            )
+            if not np.any(line_mask) or not np.any(continuum_mask):
+                return np.nan
+            continuum = np.nanmedian(fiber_lnu[continuum_mask])
+            if not np.isfinite(continuum) or continuum <= 0:
+                return np.nan
+            return float(np.nanmax(fiber_lnu[line_mask]) / continuum)
+
+        fiber_line_ratios = {
+            'O2PKCONT': line_peak_to_continuum(3727.0),
+            'HBPKCONT': line_peak_to_continuum(4861.3),
+            'O3PKCONT': line_peak_to_continuum(5006.8),
+            'HAPKCONT': line_peak_to_continuum(6562.8),
+        }
+        print(
+            "  DESI INTRINSIC FIBER LINE/CONTINUUM PEAK RATIOS: "
+            + ", ".join(
+                f"{key}={value:.4g}"
+                for key, value in fiber_line_ratios.items()
+            ),
+            flush=True,
+        )
+
     # --- 4. Imaging Output ---
     # Save Euclid
     euclid_subdir = config['paths'].get('euclid_subdir', 'Euclid')
@@ -749,7 +809,17 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             hdu_raw.header['PHI'] = phi
             hdu_raw.header['THETA'] = theta
             hdu_raw.header['SNAP'] = config['simulation']['snap_number']
+            hdu_raw.header['KAPPA'] = mod['kappa']
+            hdu_raw.header['DTM'] = mod['dust_to_metal']
+            hdu_raw.header['CURVE'] = mod['dust_curve']
             hdu_raw.header['VELSHIFT'] = mod.get('vel_shift', False)
+            hdu_raw.header['NYNGFOV'] = num_global_young
+            hdu_raw.header['NYNGFIB'] = young_in_fiber
+            hdu_raw.header['SFR10FOV'] = sfr_10myr_fov
+            hdu_raw.header['SFR10FIB'] = sfr_10myr_fiber
+            hdu_raw.header['FIBRAD'] = fiber_radius_arcsec
+            for key, value in fiber_line_ratios.items():
+                hdu_raw.header[key] = value
             hdu_raw.header['WAVEUNIT'] = 'Angstrom'
             hdu_raw.header['BUNIT'] = 'erg/s/cm2/Hz'
             hdu_raw.header['SPECTYPE'] = 'FNU'
@@ -781,6 +851,12 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
                         'DTM': mod['dust_to_metal'],
                         'CURVE': mod['dust_curve'],
                         'VELSHIFT': mod.get('vel_shift', False),
+                        'NYNGFOV': num_global_young,
+                        'NYNGFIB': young_in_fiber,
+                        'SFR10FOV': sfr_10myr_fov,
+                        'SFR10FIB': sfr_10myr_fiber,
+                        'FIBRAD': fiber_radius_arcsec,
+                        **fiber_line_ratios,
                     },
                 )
             elif noise_model == 'gaussian':

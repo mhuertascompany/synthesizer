@@ -40,6 +40,24 @@ def parse_args():
         help="Reuse an existing target/subhalo/donor manifest exactly.",
     )
     parser.add_argument(
+        "--subhalo_id",
+        type=int,
+        help=(
+            "With --input_manifest, generate only the row for this subhalo. "
+            "This is useful for isolated regeneration tests."
+        ),
+    )
+    parser.add_argument(
+        "--output_path",
+        type=Path,
+        help="Override paths.output_path without creating a separate YAML file.",
+    )
+    parser.add_argument(
+        "--n_jobs",
+        type=int,
+        help="Override optimization.n_jobs.",
+    )
+    parser.add_argument(
         "--selection_only",
         action="store_true",
         help="Write the matched manifest without generating spectra/images.",
@@ -296,6 +314,14 @@ def main():
     args = parse_args()
     with open(args.config) as stream:
         config = yaml.safe_load(stream)
+    if args.output_path is not None:
+        config["paths"]["output_path"] = str(args.output_path)
+    if args.n_jobs is not None:
+        if args.n_jobs <= 0:
+            raise ValueError("--n_jobs must be positive")
+        config["optimization"]["n_jobs"] = args.n_jobs
+    if args.subhalo_id is not None and args.input_manifest is None:
+        raise ValueError("--subhalo_id requires --input_manifest")
     sample = config["sample"]
     n_mocks = args.n_mocks if args.n_mocks is not None else sample["n_mocks"]
     seed = args.seed if args.seed is not None else sample["seed"]
@@ -316,6 +342,15 @@ def main():
         missing = sorted(required - set(targets.columns))
         if missing:
             raise KeyError(f"Input manifest is missing columns: {missing}")
+        if args.subhalo_id is not None:
+            targets = targets[
+                targets["subhalo_id"].astype(int) == args.subhalo_id
+            ].copy()
+            if len(targets) != 1:
+                raise ValueError(
+                    f"Expected exactly one row for subhalo {args.subhalo_id}, "
+                    f"found {len(targets)}"
+                )
         if args.n_mocks is not None and args.n_mocks != len(targets):
             raise ValueError(
                 f"--n_mocks={args.n_mocks} but input manifest has "

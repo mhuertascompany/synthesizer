@@ -124,6 +124,15 @@ def header_metadata(header):
         "DTM",
         "CURVE",
         "VELSHIFT",
+        "NYNGFOV",
+        "NYNGFIB",
+        "SFR10FOV",
+        "SFR10FIB",
+        "FIBRAD",
+        "O2PKCONT",
+        "HBPKCONT",
+        "O3PKCONT",
+        "HAPKCONT",
     ):
         if key in header:
             value = header[key]

@@ -1,0 +1,52 @@
+#!/bin/bash -l
+# Regenerate one matched TNG mock from particles in an isolated output tree.
+#
+# Usage:
+#   sbatch vera_single_mock_test.sb [subhalo_id] [input_manifest] [output_root]
+#
+# Subhalo 24 is the default emission-line stress test:
+# snapshot=72, z=0.450301, TNG SFR=77.4 Msun/yr.
+
+#SBATCH -J SINGLE_MOCK_TEST
+#SBATCH -o /u/mhuertas/data/synthesizer/logs/single_mock_test.%j.out
+#SBATCH -e /u/mhuertas/data/synthesizer/logs/single_mock_test.%j.err
+#SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=64000MB
+#SBATCH --time=06:00:00
+
+set -euo pipefail
+
+module purge
+module load anaconda/3/2023.03
+source /u/mhuertas/python/envs/synth/bin/activate
+
+FEASIBGS_ROOT="${FEASIBGS_ROOT:-/u/mhuertas/python/feasiBGS}"
+export PYTHONPATH="${FEASIBGS_ROOT}:${PYTHONPATH:-}"
+export DESIMODEL="${DESIMODEL:-/u/mhuertas/data/desimodel}"
+
+export OMP_NUM_THREADS=8
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+
+SUBHALO_ID="${1:-24}"
+INPUT_MANIFEST="${2:-/u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise_flux_sfr.csv}"
+OUTPUT_ROOT="${3:-/u/mhuertas/data/euclid/single_mock_tests/subhalo_${SUBHALO_ID}}"
+
+echo "Regenerating subhalo ${SUBHALO_ID} from TNG particles."
+echo "Input manifest: ${INPUT_MANIFEST}"
+echo "Isolated output: ${OUTPUT_ROOT}"
+
+python3 ./generate_matched_sample.py \
+    --config ./config_matched.yaml \
+    --input_manifest "${INPUT_MANIFEST}" \
+    --subhalo_id "${SUBHALO_ID}" \
+    --output_path "${OUTPUT_ROOT}" \
+    --n_mocks 1 \
+    --n_jobs 1 \
+    --force_overwrite
+
+echo "Generated products:"
+find "${OUTPUT_ROOT}" -maxdepth 4 -type f -print

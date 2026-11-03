@@ -2,10 +2,10 @@
 # Machine-specific paths are overridden by popeye_submit_matched.sh.
 
 paths:
-  tng_path: "/mnt/sdceph/users/sgenel/Illustris_IllustrisTNG_public_data_release/TNG50-1/output"
-  grid_dir: "/mnt/ceph/users/mhuertas/synthesizer_grids"
-  output_path: "/mnt/ceph/users/mhuertas/euclid_desi_mocks/tngmatched_kappa0p0795"
-  reference_catalog: "/mnt/ceph/users/mhuertas/euclid_desi_mocks/reference/catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.1.fits"
+  tng_path: "/mnt/sdceph/users/sgenel/Illustris_IllustrisTNG_public_data_release/L35n2160TNG/output"
+  grid_dir: "/mnt/sdceph/users/mhuertas/synthesizer_grids"
+  output_path: "/mnt/sdceph/users/mhuertas/euclid_desi_mocks/tngmatched_kappa0p0795"
+  reference_catalog: "/mnt/sdceph/users/mhuertas/euclid_desi_mocks/reference/catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.1.fits"
   filter_file: "Euclid_VIS.vis.dat"
   euclid_subdir: "Euclid_raw_and_psf"
   desi_subdir: "DESI"

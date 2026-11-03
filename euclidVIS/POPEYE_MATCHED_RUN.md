@@ -15,24 +15,24 @@ SFRs are available for donor matching.
 The TNG50 public release is expected at:
 
 ```text
-/mnt/sdceph/users/sgenel/Illustris_IllustrisTNG_public_data_release/TNG50-1/output
+/mnt/sdceph/users/sgenel/Illustris_IllustrisTNG_public_data_release/L35n2160TNG/output
 ```
 
 Two private assets must also be staged on Popeye:
 
 ```text
-/mnt/ceph/users/$USER/synthesizer_grids/
+/mnt/sdceph/users/$USER/synthesizer_grids/
   bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps.hdf5
 
-/mnt/ceph/users/$USER/euclid_desi_mocks/reference/
+/mnt/sdceph/users/$USER/euclid_desi_mocks/reference/
   catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.1.fits
 ```
 
 Create those directories with:
 
 ```bash
-mkdir -p /mnt/ceph/users/$USER/synthesizer_grids
-mkdir -p /mnt/ceph/users/$USER/euclid_desi_mocks/reference
+mkdir -p /mnt/sdceph/users/$USER/synthesizer_grids
+mkdir -p /mnt/sdceph/users/$USER/euclid_desi_mocks/reference
 ```
 
 The VIS transmission file is tracked in this repository and does not need to
@@ -65,7 +65,7 @@ Use a separate output directory for a 16-object test:
 
 ```bash
 cd /path/to/synthesizer/euclidVIS
-export POPEYE_OUTPUT_ROOT=/mnt/ceph/users/$USER/euclid_desi_mocks/smoke16_kappa0p0795
+export POPEYE_OUTPUT_ROOT=/mnt/sdceph/users/$USER/euclid_desi_mocks/smoke16_kappa0p0795
 ./popeye_submit_matched.sh 16 42 4
 ```
 
@@ -83,7 +83,7 @@ unset POPEYE_OUTPUT_ROOT
 The default output is:
 
 ```text
-/mnt/ceph/users/$USER/euclid_desi_mocks/tngmatched_kappa0p0795
+/mnt/sdceph/users/$USER/euclid_desi_mocks/tngmatched_kappa0p0795
 ```
 
 The 1,000 objects are split into 250 four-galaxy array tasks. At most four

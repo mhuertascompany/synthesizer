@@ -28,7 +28,10 @@ sample:
   selection_manifest: "matched_sample.csv"
 
 simulation:
-  grid_name: "bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps"
+  # Physically trimmed from official Syndex release 241. The retained
+  # 1200-11000 A rest-frame interval has R~5450 and covers DESI plus VIS for
+  # every target in the configured 0<z<1.5 sample.
+  grid_name: "bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res_1200-11000A"
 
 observation:
   fov_kpc: 50.0

@@ -18,11 +18,12 @@ The TNG50 public release is expected at:
 /mnt/sdceph/users/sgenel/Illustris_IllustrisTNG_public_data_release/L35n2160TNG/output
 ```
 
-Two private assets must also be staged on Popeye:
+Two untracked data assets must also be staged on Popeye (the grid is public;
+the reference catalog is private):
 
 ```text
 /mnt/sdceph/users/$USER/synthesizer_grids/
-  bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps.hdf5
+  bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res_1200-11000A.hdf5
 
 /mnt/sdceph/users/$USER/euclid_desi_mocks/reference/
   catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.1.fits
@@ -37,6 +38,34 @@ mkdir -p /mnt/sdceph/users/$USER/euclid_desi_mocks/reference
 
 The VIS transmission file is tracked in this repository and does not need to
 be copied separately.
+
+### Preparing the high-resolution grid
+
+The DESI production workflow uses official Syndex release 241, whose native
+optical wavelength grid has approximately constant `R=5450`. The complete grid
+is 8.3 GB and spans wavelengths irrelevant to this project. Download it once,
+verify the published SHA-256, then make a physical 1200--11000 Angstrom
+rest-frame subset:
+
+```bash
+cd /mnt/sdceph/users/$USER/synthesizer_grids
+curl -L --fail --retry 20 --retry-all-errors --continue-at - \
+  -o bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res.hdf5.part \
+  https://synthesizer-data-api.universe-engine.workers.dev/v1/releases/241/download
+echo "fca1244e6dfb1d25f196b18778159a01620769782d53f1d622ccaec38218ca6b  bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res.hdf5.part" \
+  | sha256sum --check
+mv bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res.hdf5.part \
+  bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res.hdf5
+
+python3 /mnt/home/$USER/python/synthesizer/euclidVIS/trim_synthesizer_grid.py \
+  bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res.hdf5 \
+  bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res_1200-11000A.hdf5 \
+  --lam-min 1200 --lam-max 11000
+```
+
+Do not replace this with an interpolation of the older `R=300` grid: a finer
+output array cannot recover stellar or nebular spectral structure that was not
+present in the source grid.
 
 ## Python environment
 

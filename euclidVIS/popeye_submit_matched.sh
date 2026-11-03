@@ -23,7 +23,7 @@ export POPEYE_REFERENCE_CATALOG="${POPEYE_REFERENCE_CATALOG:-/mnt/sdceph/users/$
 export POPEYE_OUTPUT_ROOT="${POPEYE_OUTPUT_ROOT:-/mnt/sdceph/users/${USER}/euclid_desi_mocks/tngmatched_kappa0p0795}"
 export PYTHONPATH="${SCRIPT_DIR}/../src:${POPEYE_ILLUSTRIS_PYTHON_ROOT:-${HOME}/python/illustris_python}:${PYTHONPATH:-}"
 
-GRID_NAME="bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps.hdf5"
+GRID_NAME="bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res_1200-11000A.hdf5"
 GRID_PATH="${POPEYE_GRID_DIR}/${GRID_NAME}"
 
 if [[ ! -d "${POPEYE_TNG_PATH}" ]]; then

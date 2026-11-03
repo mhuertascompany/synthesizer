@@ -58,6 +58,28 @@ def parse_args():
         help="Override optimization.n_jobs.",
     )
     parser.add_argument(
+        "--kappa",
+        type=float,
+        help="Override model.kappa for a controlled dust-opacity test.",
+    )
+    parser.add_argument(
+        "--projection_type",
+        choices=["random", "face-on", "edge-on", "manual"],
+        help="Override projection.type.",
+    )
+    parser.add_argument("--phi", type=float, help="Manual projection phi [rad].")
+    parser.add_argument(
+        "--theta", type=float, help="Manual projection theta [rad]."
+    )
+    parser.add_argument(
+        "--raw_spectra_only",
+        action="store_true",
+        help=(
+            "Write the raw DESI fiber spectrum but skip feasiBGS and empirical "
+            "noise. Useful for expensive controlled model comparisons."
+        ),
+    )
+    parser.add_argument(
         "--selection_only",
         action="store_true",
         help="Write the matched manifest without generating spectra/images.",
@@ -320,6 +342,19 @@ def main():
         if args.n_jobs <= 0:
             raise ValueError("--n_jobs must be positive")
         config["optimization"]["n_jobs"] = args.n_jobs
+    if args.kappa is not None:
+        if args.kappa < 0:
+            raise ValueError("--kappa must be non-negative")
+        config["model"]["kappa"] = args.kappa
+    if args.projection_type is not None:
+        config["projection"]["type"] = args.projection_type
+    if args.phi is not None:
+        config["projection"]["phi"] = args.phi
+    if args.theta is not None:
+        config["projection"]["theta"] = args.theta
+    if args.raw_spectra_only:
+        config["desi"]["enabled"] = True
+        config["desi"]["noise_model"] = "none"
     if args.subhalo_id is not None and args.input_manifest is None:
         raise ValueError("--subhalo_id requires --input_manifest")
     sample = config["sample"]

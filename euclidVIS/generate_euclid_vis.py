@@ -430,8 +430,6 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             safe_rotate(target_galaxy.stars, phi=phi*rad, theta=theta*rad, proj_type='manual')
             safe_rotate(target_galaxy.gas, phi=phi*rad, theta=theta*rad, proj_type='manual')
 
-            safe_rotate(target_galaxy.gas, phi=phi*rad, theta=theta*rad, proj_type='manual')
-
     # FOV and Resolution
     fov_kpc = obs['fov_kpc']
     fov_arcsec = fov_kpc / scale_kpc_per_arcsec
@@ -828,7 +826,13 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
 
             output_spectrum = os.path.join(desi_dir, f"desi_spectrum_{subhalo_id}.fits")
             noise_model = str(desi_conf.get('noise_model', 'gaussian')).lower()
-            if noise_model in {'feasibgs', 'feasibgs_edr'}:
+            if noise_model in {'none', 'raw'}:
+                print(
+                    "  DESI raw spectrum written; instrument/noise simulation "
+                    "skipped by configuration.",
+                    flush=True,
+                )
+            elif noise_model in {'feasibgs', 'feasibgs_edr'}:
                 if noise_model == 'feasibgs_edr' and not desi_conf.get('empirical_noise_donor'):
                     raise ValueError('feasibgs_edr requires an assigned empirical_noise_donor')
                 snap_number = int(config['simulation']['snap_number'])
@@ -876,8 +880,8 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
                 hdu_desi.writeto(output_spectrum, overwrite=True)
             else:
                 raise ValueError(
-                    "desi.noise_model must be 'feasibgs', 'feasibgs_edr', "
-                    "or 'gaussian'"
+                    "desi.noise_model must be 'none', 'raw', 'feasibgs', "
+                    "'feasibgs_edr', or 'gaussian'"
                 )
             print(f"  DESI spectra saved to {desi_dir}", flush=True)
         else:

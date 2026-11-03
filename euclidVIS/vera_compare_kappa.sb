@@ -1,0 +1,41 @@
+#!/bin/bash -l
+# Submit after the two-task generation array has completed:
+#   sbatch --dependency=afterok:ARRAY_JOB_ID vera_compare_kappa.sb
+
+#SBATCH -J KAPPA_PLOT
+#SBATCH -o /u/mhuertas/data/synthesizer/logs/kappa_plot.%j.out
+#SBATCH -e /u/mhuertas/data/synthesizer/logs/kappa_plot.%j.err
+#SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=4000MB
+#SBATCH --time=00:15:00
+
+set -euo pipefail
+
+module purge
+module load anaconda/3/2023.03
+source /u/mhuertas/python/envs/synth/bin/activate
+
+SUBHALO_ID="${1:-410160}"
+SNAPSHOT="${2:-78}"
+TEST_ROOT="${3:-/u/mhuertas/data/euclid/kappa_tests/subhalo_${SUBHALO_ID}}"
+REFERENCE_RAW="${4:-/u/mhuertas/data/euclid/tngmatched_euclid_desi/sn${SNAPSHOT}/DESI/desi_spectrum_${SUBHALO_ID}_raw.fits}"
+
+KAPPA_00795="${TEST_ROOT}/kappa_0p0795/sn${SNAPSHOT}/DESI/desi_spectrum_${SUBHALO_ID}_raw.fits"
+KAPPA_03="${TEST_ROOT}/kappa_0p3/sn${SNAPSHOT}/DESI/desi_spectrum_${SUBHALO_ID}_raw.fits"
+OUTPUT="${TEST_ROOT}/subhalo_${SUBHALO_ID}_kappa_comparison.png"
+METRICS="${TEST_ROOT}/subhalo_${SUBHALO_ID}_kappa_metrics.csv"
+
+for spectrum in "${REFERENCE_RAW}" "${KAPPA_00795}" "${KAPPA_03}"; do
+    if [[ ! -f "${spectrum}" ]]; then
+        echo "ERROR: spectrum not found: ${spectrum}" >&2
+        exit 1
+    fi
+done
+
+python3 ./compare_kappa_spectra.py \
+    "${REFERENCE_RAW}" "${KAPPA_00795}" "${KAPPA_03}" \
+    --output "${OUTPUT}" \
+    --metrics "${METRICS}"

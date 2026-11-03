@@ -1,0 +1,90 @@
+#!/bin/bash -l
+# Compare two dust opacity values for one already-generated matched mock.
+#
+# The job reads PHI and THETA from the existing kappa=20 raw spectrum, so the
+# only intended physical difference between the two array tasks is kappa.
+# feasiBGS/EDR noise is deliberately skipped; donor matching must be repeated
+# after kappa changes the mock fiber flux.
+#
+# Default bright emission-line candidate:
+#   subhalo=410160, snapshot=78, z=0.264, r_AB~20.22, donor S/N~13
+#
+# Usage:
+#   sbatch vera_kappa_test.sb
+#   sbatch vera_kappa_test.sb SUBHALO_ID MANIFEST REFERENCE_RAW OUTPUT_ROOT
+
+#SBATCH -J KAPPA_TEST
+#SBATCH -o /u/mhuertas/data/synthesizer/logs/kappa_test.%A_%a.out
+#SBATCH -e /u/mhuertas/data/synthesizer/logs/kappa_test.%A_%a.err
+#SBATCH -D /u/mhuertas/python/synthesizer/euclidVIS
+#SBATCH -p p.vera
+#SBATCH --array=0-1%2
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=64000MB
+#SBATCH --time=06:00:00
+
+set -euo pipefail
+
+module purge
+module load anaconda/3/2023.03
+source /u/mhuertas/python/envs/synth/bin/activate
+
+export OMP_NUM_THREADS=8
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+
+SUBHALO_ID="${1:-410160}"
+INPUT_MANIFEST="${2:-/u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise_flux_sfr.csv}"
+REFERENCE_RAW="${3:-/u/mhuertas/data/euclid/tngmatched_euclid_desi/sn78/DESI/desi_spectrum_410160_raw.fits}"
+OUTPUT_ROOT="${4:-/u/mhuertas/data/euclid/kappa_tests/subhalo_${SUBHALO_ID}}"
+
+KAPPA_VALUES=(0.0795 0.3)
+KAPPA="${KAPPA_VALUES[${SLURM_ARRAY_TASK_ID}]}"
+KAPPA_TAG="${KAPPA/./p}"
+TASK_OUTPUT="${OUTPUT_ROOT}/kappa_${KAPPA_TAG}"
+
+if [[ ! -f "${INPUT_MANIFEST}" ]]; then
+    echo "ERROR: input manifest not found: ${INPUT_MANIFEST}" >&2
+    exit 1
+fi
+if [[ ! -f "${REFERENCE_RAW}" ]]; then
+    echo "ERROR: reference raw spectrum not found: ${REFERENCE_RAW}" >&2
+    echo "Pass its path as the third positional argument." >&2
+    exit 1
+fi
+
+# Read the exact production orientation without creating a temporary config.
+read -r PHI THETA < <(
+    python3 - "${REFERENCE_RAW}" <<'PY'
+import sys
+from astropy.io import fits
+
+with fits.open(sys.argv[1], memmap=True) as hdul:
+    header = hdul[1].header
+    print(float(header["PHI"]), float(header["THETA"]))
+PY
+)
+
+echo "Subhalo:       ${SUBHALO_ID}"
+echo "Kappa:         ${KAPPA}"
+echo "Projection:    phi=${PHI}, theta=${THETA} rad"
+echo "Reference:     ${REFERENCE_RAW}"
+echo "Output:        ${TASK_OUTPUT}"
+
+python3 ./generate_matched_sample.py \
+    --config ./config_matched.yaml \
+    --input_manifest "${INPUT_MANIFEST}" \
+    --subhalo_id "${SUBHALO_ID}" \
+    --output_path "${TASK_OUTPUT}" \
+    --n_mocks 1 \
+    --n_jobs 1 \
+    --kappa "${KAPPA}" \
+    --projection_type manual \
+    --phi "${PHI}" \
+    --theta "${THETA}" \
+    --raw_spectra_only \
+    --force_overwrite
+
+echo "Generated raw products:"
+find "${TASK_OUTPUT}" -maxdepth 4 -type f -print

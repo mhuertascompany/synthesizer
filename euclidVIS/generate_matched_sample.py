@@ -24,6 +24,13 @@ from edr_empirical_noise import assign_noise_donors
 from generate_euclid_vis import process_single_galaxy_wrapper
 
 
+EMPIRICAL_DESI_NOISE_MODELS = {
+    "feasibgs_empirical",
+    "feasibgs_dr1",
+    "feasibgs_edr",  # legacy configuration spelling
+}
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Generate a TNG50 sample matched in redshift and mass."
@@ -104,7 +111,7 @@ def parse_args():
     parser.add_argument(
         "--skip_donor_assignment",
         action="store_true",
-        help="Write targets before EDR donors have been staged on this host.",
+        help="Write targets before DESI DR1 donors are staged on this host.",
     )
     parser.add_argument("--force_overwrite", action="store_true")
     return parser.parse_args()
@@ -472,11 +479,11 @@ def main():
     desi_config = config.get("desi", {})
     if (
         str(desi_config.get("noise_model", "gaussian")).lower()
-        == "feasibgs_edr"
+        in EMPIRICAL_DESI_NOISE_MODELS
         and not args.skip_donor_assignment
         and "noise_donor_path" not in targets.columns
     ):
-        print("Assigning empirical EDR noise donors...", flush=True)
+        print("Assigning empirical DESI DR1 noise donors...", flush=True)
         targets = assign_noise_donors(
             targets,
             desi_config["edr_donor_catalog"],
@@ -519,12 +526,13 @@ def main():
     if args.selection_only:
         return
 
-    if (
-        str(desi_config.get("noise_model", "gaussian")).lower()
-        == "feasibgs_edr"
+    if str(desi_config.get("noise_model", "gaussian")).lower() in (
+        EMPIRICAL_DESI_NOISE_MODELS
     ):
         if "noise_donor_path" not in targets.columns:
-            raise ValueError("No EDR donors assigned; remove --skip_donor_assignment")
+            raise ValueError(
+                "No DESI DR1 donors assigned; remove --skip_donor_assignment"
+            )
         missing_donors = [
             path
             for path in targets["noise_donor_path"].unique()
@@ -533,7 +541,8 @@ def main():
         if missing_donors:
             preview = "\n".join(f"  {path}" for path in missing_donors[:10])
             raise FileNotFoundError(
-                f"{len(missing_donors)} assigned EDR donor files are missing:\n{preview}"
+                f"{len(missing_donors)} assigned DESI DR1 donor files are "
+                f"missing:\n{preview}"
             )
 
     grid, vis_filter, model = load_shared_resources(config)

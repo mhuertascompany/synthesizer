@@ -832,9 +832,18 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
                     "skipped by configuration.",
                     flush=True,
                 )
-            elif noise_model in {'feasibgs', 'feasibgs_edr'}:
-                if noise_model == 'feasibgs_edr' and not desi_conf.get('empirical_noise_donor'):
-                    raise ValueError('feasibgs_edr requires an assigned empirical_noise_donor')
+            elif noise_model in {
+                'feasibgs', 'feasibgs_empirical', 'feasibgs_dr1',
+                'feasibgs_edr',
+            }:
+                if (
+                    noise_model != 'feasibgs'
+                    and not desi_conf.get('empirical_noise_donor')
+                ):
+                    raise ValueError(
+                        f'{noise_model} requires an assigned '
+                        'empirical_noise_donor'
+                    )
                 snap_number = int(config['simulation']['snap_number'])
                 base_seed = int(desi_conf.get('noise_seed', 42))
                 noise_seed = (base_seed + snap_number * 1000003 + int(subhalo_id)) % 4294967295
@@ -881,7 +890,7 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             else:
                 raise ValueError(
                     "desi.noise_model must be 'none', 'raw', 'feasibgs', "
-                    "'feasibgs_edr', or 'gaussian'"
+                    "'feasibgs_empirical', or 'gaussian'"
                 )
             print(f"  DESI spectra saved to {desi_dir}", flush=True)
         else:

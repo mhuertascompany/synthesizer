@@ -7,8 +7,8 @@ the Calzetti attenuation curve, velocity-shifted particle spectra, a 1.5-arcsec
 DESI fiber, and the Euclid VIS image configuration.
 
 The expensive production stage writes raw Euclid images and raw DESI spectra.
-Empirical EDR noise is intentionally deferred until mock fiber fluxes and fiber
-SFRs are available for donor matching.
+Empirical DESI DR1 noise is intentionally deferred until mock fiber fluxes and
+fiber SFRs are available for donor matching.
 
 ## Required inputs
 
@@ -171,9 +171,12 @@ functions, sky/source/detector noise, and writes standard B/R/Z `FLUX`, `IVAR`,
 `MASK`, and `RESOLUTION` extensions. The final primary header contains
 `FEASIBGS=True` and `NOISEMOD=FEASIBGS`. The raw spectrum is never changed.
 
-After inspecting this physical-noise baseline, the survey-matched alternative
+After inspecting this physical-noise baseline, the DR1-matched alternative
 is to enrich `matched_sample.csv` with mock fiber flux and the fiber SFR
-diagnostics stored in each raw FITS header. Assign EDR donors using redshift,
+diagnostics stored in each raw FITS header. Assign DR1 donors using redshift,
 mass, fiber flux, and fiber sSFR before running
 `apply_edr_noise_to_existing_mocks.py`. That later stage keeps the DESI response
-but replaces the simulated variance with the matched donor IVAR and mask.
+but replaces the simulated variance with the matched DR1 coadd IVAR and mask.
+The older `edr_*` filenames are retained only for compatibility with manifests
+already generated on Teide; new products record `NOISEMOD=DR1_IVAR` and
+`DONREL=DR1` in their primary headers.

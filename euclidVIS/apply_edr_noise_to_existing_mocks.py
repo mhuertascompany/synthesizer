@@ -1,4 +1,7 @@
-"""Apply empirical EDR noise to existing noiseless DESI mock spectra."""
+"""Apply empirical DESI DR1 noise to existing noiseless mock spectra.
+
+The filename is retained for compatibility with the existing Vera workflow.
+"""
 
 import argparse
 import copy
@@ -29,7 +32,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description=(
             "Run existing noiseless *_raw.fits spectra through feasiBGS and "
-            "apply the EDR donor IVAR/mask recorded in a matched manifest."
+            "apply the DESI DR1 donor IVAR/mask recorded in a matched manifest."
         )
     )
     parser.add_argument("--manifest", type=Path, required=True)
@@ -52,7 +55,7 @@ def parse_args():
     parser.add_argument(
         "--backup-existing",
         action="store_true",
-        help="Save the previous final spectrum as *.pre_edr.fits once.",
+        help="Save the previous final spectrum as *.pre_dr1.fits once.",
     )
     return parser.parse_args()
 
@@ -158,11 +161,13 @@ def process_row(row, config, overwrite, backup_existing):
     desi_config["empirical_noise_donor_program"] = str(
         row["noise_donor_program"]
     )
+    release = str(desi_config.get("empirical_noise_release", "DR1")).upper()
+    expected_noise_model = f"{release}_IVAR"
     base_seed = int(desi_config.get("noise_seed", 42))
     noise_seed = (base_seed + snapshot * 1000003 + subhalo_id) % 4294967295
 
     if output_path.exists() and backup_existing:
-        backup_path = output_path.with_name(f"{output_path.stem}.pre_edr.fits")
+        backup_path = output_path.with_name(f"{output_path.stem}.pre_dr1.fits")
         if not backup_path.exists():
             shutil.copy2(output_path, backup_path)
 
@@ -177,7 +182,7 @@ def process_row(row, config, overwrite, backup_existing):
     with fits.open(output_path, memmap=False) as hdul:
         noise_model = hdul[0].header.get("NOISEMOD")
         donor = hdul[0].header.get("DONOR")
-    if noise_model != "EDR_IVAR" or donor != int(row["noise_donor_targetid"]):
+    if noise_model != expected_noise_model or donor != int(row["noise_donor_targetid"]):
         raise RuntimeError(
             f"Output validation failed for subhalo {subhalo_id}: "
             f"NOISEMOD={noise_model}, DONOR={donor}"
@@ -208,8 +213,19 @@ def main():
 
     with args.config.open() as stream:
         config = yaml.safe_load(stream)
-    if str(config.get("desi", {}).get("noise_model", "")).lower() != "feasibgs_edr":
-        raise ValueError("config desi.noise_model must be 'feasibgs_edr'")
+    supported_noise_models = {
+        "feasibgs_empirical",
+        "feasibgs_dr1",
+        "feasibgs_edr",  # legacy configuration spelling
+    }
+    configured_noise_model = str(
+        config.get("desi", {}).get("noise_model", "")
+    ).lower()
+    if configured_noise_model not in supported_noise_models:
+        raise ValueError(
+            "config desi.noise_model must be 'feasibgs_empirical' "
+            "(legacy 'feasibgs_edr' is also accepted)"
+        )
 
     manifest = pd.read_csv(args.manifest)
     missing_columns = sorted(REQUIRED_MANIFEST_COLUMNS - set(manifest.columns))
@@ -243,7 +259,7 @@ def main():
     n_jobs = args.n_jobs or int(config.get("optimization", {}).get("n_jobs", 1))
     records = manifest.to_dict("records")
     print(
-        f"Applying empirical EDR noise to {len(records)} existing raw spectra "
+        f"Applying empirical DESI DR1 noise to {len(records)} existing raw spectra "
         f"with n_jobs={n_jobs}.",
         flush=True,
     )

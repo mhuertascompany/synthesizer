@@ -1,4 +1,8 @@
-"""EDR donor selection and empirical DESI noise injection utilities."""
+"""DESI donor selection and empirical release-matched noise utilities.
+
+The module name is retained for compatibility with existing manifests and
+batch scripts, but the current donor archive is DESI DR1 rather than EDR.
+"""
 
 from __future__ import annotations
 
@@ -40,7 +44,7 @@ def discover_spectrum_targetids(spectra_dir):
 
 
 def load_donor_candidates(catalog_path, spectra_dir, sample):
-    """Load valid EDR noise donors and their matching coordinates."""
+    """Load valid DESI noise donors and their matching coordinates."""
     required = {
         "TARGETID",
         "SPECTYPE",
@@ -63,7 +67,7 @@ def load_donor_candidates(catalog_path, spectra_dir, sample):
             table = hdul[1].data
             missing = sorted(required - set(table.names))
             if missing:
-                raise KeyError(f"EDR donor catalog is missing columns: {missing}")
+                raise KeyError(f"DESI donor catalog is missing columns: {missing}")
             columns = {name: np.asarray(table[name]) for name in required}
 
     targetid = columns["TARGETID"].astype(np.int64)
@@ -109,7 +113,7 @@ def load_donor_candidates(catalog_path, spectra_dir, sample):
     )
     indices = np.flatnonzero(valid)
     if indices.size == 0:
-        raise ValueError("No EDR donor galaxies pass the selection and file checks")
+        raise ValueError("No DESI donor galaxies pass the selection and file checks")
 
     return pd.DataFrame(
         {
@@ -136,7 +140,7 @@ def load_donor_candidates(catalog_path, spectra_dir, sample):
 
 
 def assign_noise_donors(targets, catalog_path, spectra_dir, sample, config, seed):
-    """Assign reproducible, usually unique EDR donors to mock targets."""
+    """Assign reproducible, usually unique DESI donors to mock targets."""
     donors = load_donor_candidates(catalog_path, spectra_dir, sample)
     z_scale = float(config.get("donor_redshift_scale", 0.05))
     mass_scale = float(config.get("donor_log_mass_scale", 0.2))
@@ -154,7 +158,7 @@ def assign_noise_donors(targets, catalog_path, spectra_dir, sample, config, seed
         or flux_scale <= 0
         or k_neighbors <= 0
     ):
-        raise ValueError("EDR donor scales and donor_k_neighbors must be positive")
+        raise ValueError("DESI donor scales and donor_k_neighbors must be positive")
     if ssfr_floor >= ssfr_ceiling:
         raise ValueError("donor_log_ssfr_floor must be below its ceiling")
 
@@ -272,7 +276,7 @@ def assign_noise_donors(targets, catalog_path, spectra_dir, sample, config, seed
 
 
 def load_noise_template(path):
-    """Read a simplified EDR WAVELENGTH/IVAR/MASK spectrum."""
+    """Read a simplified DESI WAVELENGTH/IVAR/MASK spectrum."""
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="File may have been truncated")
         with fits.open(path, memmap=False) as hdul:
@@ -284,12 +288,15 @@ def load_noise_template(path):
     order = np.argsort(wave)
     wave, ivar, mask = wave[order], ivar[order], mask[order]
     if wave.ndim != 1 or wave.size < 2 or np.any(np.diff(wave) <= 0):
-        raise ValueError(f"Invalid EDR wavelength grid in {path}")
+        raise ValueError(f"Invalid DESI wavelength grid in {path}")
     return wave, ivar, mask
 
 
-def apply_noise_template(output_path, donor_path, seed):
-    """Replace noise in a noiseless feasiBGS product using an EDR IVAR template."""
+def apply_noise_template(output_path, donor_path, seed, release="DR1"):
+    """Replace noise using an empirical DESI release IVAR/mask template."""
+    release = re.sub(r"[^A-Z0-9]+", "_", str(release).upper()).strip("_")
+    if not release:
+        raise ValueError("DESI empirical-noise release label cannot be empty")
     donor_wave, donor_ivar, donor_mask = load_noise_template(donor_path)
     donor_good = (
         np.isfinite(donor_wave)
@@ -298,7 +305,7 @@ def apply_noise_template(output_path, donor_path, seed):
         & (donor_mask == 0)
     )
     if donor_good.sum() < 2:
-        raise ValueError(f"EDR donor {donor_path} has insufficient valid IVAR")
+        raise ValueError(f"DESI donor {donor_path} has insufficient valid IVAR")
     donor_variance = np.full(donor_ivar.shape, np.nan, dtype=float)
     donor_variance[donor_good] = 1.0 / donor_ivar[donor_good]
     rng = np.random.default_rng(int(seed))
@@ -343,17 +350,21 @@ def apply_noise_template(output_path, donor_path, seed):
 
         target_match = TARGETID_PATTERN.match(Path(donor_path).name)
         header = hdul[0].header
-        header["NOISEMOD"] = ("EDR_IVAR", "Empirical EDR inverse-variance noise")
+        header["NOISEMOD"] = (
+            f"{release}_IVAR",
+            f"Empirical DESI {release} inverse-variance noise",
+        )
+        header["DONREL"] = (release, "DESI noise donor data release")
         header["DONOR"] = (
             int(target_match.group(1)) if target_match else -1,
-            "EDR noise donor TARGETID",
+            "DESI noise donor TARGETID",
         )
         hdul.flush()
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Assign empirical EDR noise donors to a matched mock manifest."
+        description="Assign empirical DESI noise donors to a matched mock manifest."
     )
     parser.add_argument("--targets", type=Path, required=True)
     parser.add_argument("--catalog", type=Path, required=True)
@@ -426,7 +437,7 @@ def main():
     copy_list.parent.mkdir(parents=True, exist_ok=True)
     unique_paths = source_paths.drop_duplicates()
     copy_list.write_text("\n".join(unique_paths) + "\n")
-    print(f"Assigned {len(assigned)} mocks using {len(unique_paths)} EDR donors")
+    print(f"Assigned {len(assigned)} mocks using {len(unique_paths)} DESI donors")
     print(assigned.groupby("noise_donor_program").size().to_string())
     print(f"Manifest: {args.output}")
     print(f"Files to transfer: {copy_list}")

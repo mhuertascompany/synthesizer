@@ -57,7 +57,7 @@ optimization:
 desi:
   enabled: true
   fiber_diameter_arcsec: 1.5
-  # Generate the expensive intrinsic products first. Empirical EDR noise is a
+  # Generate the expensive intrinsic products first. Empirical DR1 noise is a
   # separate, inexpensive stage after fiber flux/SFR donor matching.
   noise_model: "none"
   # Parameters used by the independent feasiBGS post-processing stage. The

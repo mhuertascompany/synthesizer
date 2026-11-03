@@ -128,7 +128,7 @@ def process_row(row, config, overwrite, backup_existing, response_only):
 
     wave, fnu, raw_header = load_raw_spectrum(raw_path)
     desi_config = copy.deepcopy(config["desi"])
-    # This stage represents the physical feasiBGS realization. Empirical EDR
+    # This stage represents the physical feasiBGS realization. Empirical DR1
     # donor noise, when desired, remains a later and separately auditable step.
     for key in list(desi_config):
         if key.startswith("empirical_noise_donor"):

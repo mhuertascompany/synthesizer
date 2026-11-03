@@ -58,10 +58,12 @@ optimization:
 desi:
   enabled: true
   fiber_diameter_arcsec: 1.5
-  # feasiBGS supplies the DESI response/resolution; EDR donor IVAR and masks
+  # feasiBGS supplies the DESI response/resolution; DR1 donor IVAR and masks
   # supply the empirical wavelength-dependent noise and coadd depth.
-  noise_model: "feasibgs_edr"
-  # These paths are on Vera. Select donors against the full archive on Teide,
+  noise_model: "feasibgs_empirical"
+  empirical_noise_release: "DR1"
+  # These legacy path keys are kept for compatibility. Select DR1 donors
+  # against the full archive on Teide,
   # then transfer only the resulting donor FITS files into this directory.
   edr_donor_catalog: "/u/mhuertas/data/euclid/reference/catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.0.fits"
   edr_spectra_dir: "/u/mhuertas/data/euclid/edr_noise_donors/spectra"

@@ -156,7 +156,12 @@ def simulate_feasibgs_exposure(
         )
 
         if donor_path:
-            apply_noise_template(temp_name, donor_path, seed)
+            apply_noise_template(
+                temp_name,
+                donor_path,
+                seed,
+                release=config.get("empirical_noise_release", "DR1"),
+            )
 
         # feasiBGS writes standard DESI extensions. Add mock provenance only
         # to the primary header so the DESI data model remains intact.
@@ -171,7 +176,7 @@ def simulate_feasibgs_exposure(
             if donor_path:
                 header["DONPROG"] = (
                     str(config.get("empirical_noise_donor_program", "UNKNOWN"))[:8],
-                    "EDR noise donor program",
+                    "DESI noise donor program",
                 )
             else:
                 header["NOISEMOD"] = (

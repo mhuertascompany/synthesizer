@@ -1,6 +1,11 @@
-# Empirical DESI EDR noise workflow
+# Empirical DESI DR1 noise workflow
 
-The full EDR spectrum archive is on Teide, while the TNG50 generation runs on
+The matched catalog and spectrum archive used here are DESI DR1. Historical
+script, directory, and manifest names containing `edr` are retained for
+compatibility; they do not indicate that the donors are from the Early Data
+Release.
+
+The full DR1 spectrum archive is on Teide, while the TNG50 generation runs on
 Vera. Donors are therefore assigned on Teide and only the selected spectra are
 transferred to Vera.
 
@@ -159,5 +164,5 @@ sbatch vera_matched.sb 100 42 \
 feasiBGS is run without stochastic noise so it still supplies the DESI
 instrument response and resolution. The selected donor's wavelength-dependent
 IVAR and mask are interpolated onto each B/R/Z camera grid, and a fresh seeded
-Gaussian realization is added. Output headers contain `NOISEMOD=EDR_IVAR`,
-`DONOR=<TARGETID>`, and `DONPROG=<bright|dark>`.
+Gaussian realization is added. Output headers contain `NOISEMOD=DR1_IVAR`,
+`DONREL=DR1`, `DONOR=<TARGETID>`, and `DONPROG=<bright|dark>`.

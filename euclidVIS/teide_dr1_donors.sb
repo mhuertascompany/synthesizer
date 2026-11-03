@@ -1,0 +1,84 @@
+#!/bin/bash -l
+# Assign empirical DESI DR1 coadd-noise donors on Teide and bundle only the
+# selected spectra for transfer to Popeye.
+#
+# Usage:
+#   sbatch teide_dr1_donors.sb [targets_csv] [output_directory] [seed]
+
+#SBATCH -J DR1_DONORS
+#SBATCH -p express
+#SBATCH -N 1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=8G
+#SBATCH --time=01:00:00
+#SBATCH -o dr1_donors.%j.out
+#SBATCH -e dr1_donors.%j.err
+#SBATCH -D .
+
+set -euo pipefail
+
+module purge
+module load Miniconda3/23.5.2-0
+
+SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"
+DEFAULT_OUTPUT_DIR="/home/mhuertas/iac18_mhuertas_shared/mhuertas/euclid_desi_mocks"
+TARGETS="${1:-${DEFAULT_OUTPUT_DIR}/matched_sample_mock_properties.csv}"
+OUTPUT_DIR="${2:-${DEFAULT_OUTPUT_DIR}}"
+SEED="${3:-190734905}"
+
+CATALOG="/home/mhuertas/iac18_aasensio_shared/euclid_dr1/catalog/catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.0.fits"
+SPECTRA_DIR="/home/mhuertas/iac18_aasensio_shared/euclid_dr1/spectra"
+# Retain the existing environment name; its packages are release-independent.
+ENV_DIR="${DEFAULT_OUTPUT_DIR}/envs/edr-noise"
+POPEYE_DONOR_DIR="${POPEYE_DONOR_DIR:-/mnt/sdceph/users/mhuertas/desi_dr1_noise_donors/spectra}"
+OUTPUT_MANIFEST="${OUTPUT_DIR}/matched_sample_dr1_noise_flux_sfr.csv"
+COPY_LIST="${OUTPUT_DIR}/dr1_donor_files_flux_sfr.txt"
+SELECTED_DIR="${OUTPUT_DIR}/selected_dr1_donors"
+BUNDLE="${OUTPUT_DIR}/selected_dr1_donors.tar.gz"
+
+if [[ ! -f "${TARGETS}" ]]; then
+    echo "ERROR: target manifest not found: ${TARGETS}" >&2
+    exit 2
+fi
+if [[ ! -f "${CATALOG}" ]]; then
+    echo "ERROR: DESI DR1 catalog not found: ${CATALOG}" >&2
+    exit 2
+fi
+if [[ ! -d "${SPECTRA_DIR}" ]]; then
+    echo "ERROR: DESI DR1 spectra directory not found: ${SPECTRA_DIR}" >&2
+    exit 2
+fi
+if [[ ! -x "${ENV_DIR}/bin/python" ]]; then
+    echo "ERROR: donor-assignment environment not found: ${ENV_DIR}" >&2
+    exit 2
+fi
+
+mkdir -p "${OUTPUT_DIR}" "${SELECTED_DIR}"
+cd "${SCRIPT_DIR}"
+
+srun "${ENV_DIR}/bin/python" ./edr_empirical_noise.py \
+    --targets "${TARGETS}" \
+    --catalog "${CATALOG}" \
+    --spectra-dir "${SPECTRA_DIR}" \
+    --output "${OUTPUT_MANIFEST}" \
+    --copy-list "${COPY_LIST}" \
+    --assigned-spectra-dir "${POPEYE_DONOR_DIR}" \
+    --match-ssfr \
+    --match-flux \
+    --log-ssfr-scale 0.6 \
+    --log-flux-scale 0.4 \
+    --seed "${SEED}"
+
+while IFS= read -r spectrum; do
+    cp -p "${spectrum}" "${SELECTED_DIR}/"
+done < "${COPY_LIST}"
+
+# The archive contains exactly the files in the current copy list, even if the
+# staging directory also contains donors retained from an earlier run.
+awk -F/ '{print $NF}' "${COPY_LIST}" \
+    | tar -C "${SELECTED_DIR}" -czf "${BUNDLE}" -T -
+
+echo "DR1 donor manifest: ${OUTPUT_MANIFEST}"
+echo "DR1 donor bundle:   ${BUNDLE}"
+echo "Popeye destination: ${POPEYE_DONOR_DIR}"

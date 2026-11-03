@@ -22,6 +22,11 @@ def parse_args():
         type=Path,
         default=Path(__file__).with_name("config_matched.yaml"),
     )
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        help="Override paths.output_path in the config.",
+    )
     parser.add_argument("--r-wave-min", type=float, default=5600.0)
     parser.add_argument("--r-wave-max", type=float, default=7000.0)
     parser.add_argument("--log-ssfr-floor", type=float, default=-13.0)
@@ -121,6 +126,8 @@ def main():
         raise ValueError("--r-wave-min must be less than --r-wave-max")
     with args.config.open() as stream:
         config = yaml.safe_load(stream)
+    if args.output_root is not None:
+        config["paths"]["output_path"] = str(args.output_root)
     table = pd.read_csv(args.manifest)
     required = {"snapshot", "subhalo_id", "tng_log_mass"}
     missing = sorted(required - set(table.columns))

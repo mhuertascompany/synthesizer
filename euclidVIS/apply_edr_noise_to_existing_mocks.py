@@ -41,6 +41,14 @@ def parse_args():
         type=Path,
         default=Path(__file__).with_name("config_matched.yaml"),
     )
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        help=(
+            "Override paths.output_path in the config. Raw spectra are read "
+            "from this root and final DR1-like products are written beside them."
+        ),
+    )
     parser.add_argument("--n-jobs", type=int, default=None)
     parser.add_argument(
         "--limit",
@@ -213,6 +221,8 @@ def main():
 
     with args.config.open() as stream:
         config = yaml.safe_load(stream)
+    if args.output_root is not None:
+        config["paths"]["output_path"] = str(args.output_root)
     supported_noise_models = {
         "feasibgs_empirical",
         "feasibgs_dr1",

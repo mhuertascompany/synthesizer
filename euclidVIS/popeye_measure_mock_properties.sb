@@ -1,0 +1,39 @@
+#!/bin/bash -l
+# Enrich a completed Popeye raw-mock manifest with TNG sSFR and fiber r flux.
+
+#SBATCH -J MOCK_PROPERTIES
+#SBATCH -p genx
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=16G
+#SBATCH --time=02:00:00
+
+set -euo pipefail
+
+module purge
+module load python/3.11.11
+
+SCRIPT_DIR="${POPEYE_SCRIPT_DIR:-${SLURM_SUBMIT_DIR:?Set POPEYE_SCRIPT_DIR}}"
+PYTHON_BIN="${POPEYE_PYTHON:-/mnt/home/${USER}/.venvs/synth/bin/python}"
+ILLUSTRIS_ROOT="${POPEYE_ILLUSTRIS_PYTHON_ROOT:-/mnt/home/${USER}/python/illustris_python}"
+OUTPUT_ROOT="${1:?Pass the completed raw-production root}"
+INPUT_MANIFEST="${2:-${OUTPUT_ROOT}/matched_sample.csv}"
+OUTPUT_MANIFEST="${3:-${OUTPUT_ROOT}/matched_sample_mock_properties.csv}"
+
+export PYTHONPATH="${SCRIPT_DIR}/../src:${ILLUSTRIS_ROOT}:${PYTHONPATH:-}"
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+
+if [[ ! -f "${INPUT_MANIFEST}" ]]; then
+    echo "ERROR: input manifest not found: ${INPUT_MANIFEST}" >&2
+    exit 1
+fi
+
+cd "${SCRIPT_DIR}"
+"${PYTHON_BIN}" ./measure_mock_matching_properties.py \
+    --config ./config_popeye.yaml \
+    --output-root "${OUTPUT_ROOT}" \
+    --manifest "${INPUT_MANIFEST}" \
+    --output "${OUTPUT_MANIFEST}"

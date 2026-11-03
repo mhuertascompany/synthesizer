@@ -10,6 +10,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+export POPEYE_SCRIPT_DIR="${SCRIPT_DIR}"
 N_MOCKS="${1:-1000}"
 SEED="${2:-42}"
 GALAXIES_PER_NODE="${3:-4}"

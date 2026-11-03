@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${POPEYE_SCRIPT_DIR:-${SLURM_SUBMIT_DIR:?Set POPEYE_SCRIPT_DIR}}"
 cd "${SCRIPT_DIR}"
 
 INPUT_MANIFEST="${1:?Pass the master selection manifest}"

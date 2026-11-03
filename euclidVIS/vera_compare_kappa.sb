@@ -18,10 +18,10 @@ module purge
 module load anaconda/3/2023.03
 source /u/mhuertas/python/envs/synth/bin/activate
 
-SUBHALO_ID="${1:-410160}"
-SNAPSHOT="${2:-78}"
+SUBHALO_ID="${1:-24}"
+SNAPSHOT="${2:-72}"
 TEST_ROOT="${3:-/u/mhuertas/data/euclid/kappa_tests/subhalo_${SUBHALO_ID}}"
-REFERENCE_RAW="${4:-/u/mhuertas/data/euclid/tngmatched_euclid_desi/sn${SNAPSHOT}/DESI/desi_spectrum_${SUBHALO_ID}_raw.fits}"
+REFERENCE_RAW="${4:-/u/mhuertas/data/euclid/single_mock_tests/subhalo_${SUBHALO_ID}/sn${SNAPSHOT}/DESI/desi_spectrum_${SUBHALO_ID}_raw.fits}"
 
 KAPPA_00795="${TEST_ROOT}/kappa_0p0795/sn${SNAPSHOT}/DESI/desi_spectrum_${SUBHALO_ID}_raw.fits"
 KAPPA_03="${TEST_ROOT}/kappa_0p3/sn${SNAPSHOT}/DESI/desi_spectrum_${SUBHALO_ID}_raw.fits"

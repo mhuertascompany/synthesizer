@@ -52,6 +52,13 @@ def parse_args():
         type=Path,
         help="Override paths.output_path without creating a separate YAML file.",
     )
+    parser.add_argument("--tng_path", type=Path, help="Override paths.tng_path.")
+    parser.add_argument("--grid_dir", type=Path, help="Override paths.grid_dir.")
+    parser.add_argument(
+        "--reference_catalog",
+        type=Path,
+        help="Override paths.reference_catalog.",
+    )
     parser.add_argument(
         "--n_jobs",
         type=int,
@@ -78,6 +85,16 @@ def parse_args():
             "Write the raw DESI fiber spectrum but skip feasiBGS and empirical "
             "noise. Useful for expensive controlled model comparisons."
         ),
+    )
+    parser.add_argument(
+        "--shard_index",
+        type=int,
+        help="Zero-based shard to process from --input_manifest.",
+    )
+    parser.add_argument(
+        "--n_shards",
+        type=int,
+        help="Total number of balanced contiguous manifest shards.",
     )
     parser.add_argument(
         "--selection_only",
@@ -288,10 +305,17 @@ def load_shared_resources(config):
         config["simulation"]["grid_name"],
         grid_dir=paths["grid_dir"],
     )
-    local_filter = os.path.join(
-        paths["grid_dir"], paths.get("filter_file", "Euclid_VIS.vis.dat")
+    filter_name = paths.get("filter_file", "Euclid_VIS.vis.dat")
+    filter_candidates = [Path(paths["grid_dir"]) / filter_name]
+    if not Path(filter_name).is_absolute():
+        filter_candidates.append(
+            Path(__file__).resolve().parents[1] / "filters" / filter_name
+        )
+    local_filter = next(
+        (candidate for candidate in filter_candidates if candidate.is_file()),
+        None,
     )
-    if os.path.exists(local_filter):
+    if local_filter is not None:
         curve = np.loadtxt(local_filter)
         vis_filter = Filter(
             "Euclid/VIS_local",
@@ -338,6 +362,12 @@ def main():
         config = yaml.safe_load(stream)
     if args.output_path is not None:
         config["paths"]["output_path"] = str(args.output_path)
+    if args.tng_path is not None:
+        config["paths"]["tng_path"] = str(args.tng_path)
+    if args.grid_dir is not None:
+        config["paths"]["grid_dir"] = str(args.grid_dir)
+    if args.reference_catalog is not None:
+        config["paths"]["reference_catalog"] = str(args.reference_catalog)
     if args.n_jobs is not None:
         if args.n_jobs <= 0:
             raise ValueError("--n_jobs must be positive")
@@ -355,11 +385,20 @@ def main():
     if args.raw_spectra_only:
         config["desi"]["enabled"] = True
         config["desi"]["noise_model"] = "none"
+    if (args.shard_index is None) != (args.n_shards is None):
+        raise ValueError("--shard_index and --n_shards must be provided together")
+    if args.shard_index is not None and args.input_manifest is None:
+        raise ValueError("Manifest sharding requires --input_manifest")
+    if args.n_shards is not None and args.n_shards <= 0:
+        raise ValueError("--n_shards must be positive")
+    if args.shard_index is not None and not 0 <= args.shard_index < args.n_shards:
+        raise ValueError("--shard_index must satisfy 0 <= index < n_shards")
     if args.subhalo_id is not None and args.input_manifest is None:
         raise ValueError("--subhalo_id requires --input_manifest")
     sample = config["sample"]
     n_mocks = args.n_mocks if args.n_mocks is not None else sample["n_mocks"]
     seed = args.seed if args.seed is not None else sample["seed"]
+    sample["seed"] = int(seed)
     if n_mocks <= 0:
         raise ValueError("n_mocks must be positive")
     if args.force_overwrite:
@@ -386,6 +425,19 @@ def main():
                     f"Expected exactly one row for subhalo {args.subhalo_id}, "
                     f"found {len(targets)}"
                 )
+        if args.shard_index is not None:
+            shards = np.array_split(np.arange(len(targets)), args.n_shards)
+            indices = shards[args.shard_index]
+            if len(indices) == 0:
+                raise ValueError(
+                    f"Shard {args.shard_index}/{args.n_shards} is empty"
+                )
+            targets = targets.iloc[indices].copy()
+            print(
+                f"Selected shard {args.shard_index + 1}/{args.n_shards}: "
+                f"{len(targets)} targets",
+                flush=True,
+            )
         if args.n_mocks is not None and args.n_mocks != len(targets):
             raise ValueError(
                 f"--n_mocks={args.n_mocks} but input manifest has "
@@ -447,9 +499,17 @@ def main():
 
     output_root = Path(config["paths"]["output_path"])
     output_root.mkdir(parents=True, exist_ok=True)
-    manifest = output_root / sample.get(
-        "selection_manifest", "matched_sample.csv"
-    )
+    if args.shard_index is None:
+        manifest = output_root / sample.get(
+            "selection_manifest", "matched_sample.csv"
+        )
+    else:
+        manifest = (
+            output_root
+            / "run_manifests"
+            / f"shard_{args.shard_index:05d}_of_{args.n_shards:05d}.csv"
+        )
+        manifest.parent.mkdir(parents=True, exist_ok=True)
     targets.to_csv(manifest, index=False)
     print(f"Wrote selection manifest: {manifest}", flush=True)
     print(
@@ -493,6 +553,15 @@ def main():
     )
     for result in results:
         print(result, flush=True)
+    failures = [
+        result
+        for result in results
+        if str(result).startswith("ERROR:") or "Failed to load" in str(result)
+    ]
+    if failures:
+        raise RuntimeError(
+            f"{len(failures)} of {len(results)} mock generations failed"
+        )
 
 
 if __name__ == "__main__":

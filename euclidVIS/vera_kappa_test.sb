@@ -6,8 +6,9 @@
 # feasiBGS/EDR noise is deliberately skipped; donor matching must be repeated
 # after kappa changes the mock fiber flux.
 #
-# Default bright emission-line candidate:
-#   subhalo=410160, snapshot=78, z=0.264, r_AB~20.22, donor S/N~13
+# Default emission-line stress test:
+#   subhalo=24, snapshot=72, z=0.4503
+#   SFR_10Myr,fiber=91.7 Msun/yr, 9024 young particles in the fiber
 #
 # Usage:
 #   sbatch vera_kappa_test.sb
@@ -34,9 +35,9 @@ export OMP_NUM_THREADS=8
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 
-SUBHALO_ID="${1:-410160}"
+SUBHALO_ID="${1:-24}"
 INPUT_MANIFEST="${2:-/u/mhuertas/data/euclid/edr_noise_donors/matched_sample_edr_noise_flux_sfr.csv}"
-REFERENCE_RAW="${3:-/u/mhuertas/data/euclid/tngmatched_euclid_desi/sn78/DESI/desi_spectrum_410160_raw.fits}"
+REFERENCE_RAW="${3:-/u/mhuertas/data/euclid/single_mock_tests/subhalo_24/sn72/DESI/desi_spectrum_24_raw.fits}"
 OUTPUT_ROOT="${4:-/u/mhuertas/data/euclid/kappa_tests/subhalo_${SUBHALO_ID}}"
 
 KAPPA_VALUES=(0.0795 0.3)

@@ -1,0 +1,114 @@
+# Popeye Euclid--DESI matched production run
+
+This workflow draws a fixed sample from the Euclid-DEEP objects in the matched
+DESI--Euclid catalog, with `z < 1.5` and `log10(Mstar/Msun) > 9.5`. TNG50
+subhalos are matched in redshift and stellar mass. Products use `kappa=0.0795`,
+the Calzetti attenuation curve, velocity-shifted particle spectra, a 1.5-arcsec
+DESI fiber, and the Euclid VIS image configuration.
+
+The expensive production stage writes raw Euclid images and raw DESI spectra.
+Empirical EDR noise is intentionally deferred until mock fiber fluxes and fiber
+SFRs are available for donor matching.
+
+## Required inputs
+
+The TNG50 public release is expected at:
+
+```text
+/mnt/sdceph/users/sgenel/Illustris_IllustrisTNG_public_data_release/TNG50-1/output
+```
+
+Two private assets must also be staged on Popeye:
+
+```text
+/mnt/ceph/users/$USER/synthesizer_grids/
+  bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps.hdf5
+
+/mnt/ceph/users/$USER/euclid_desi_mocks/reference/
+  catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.1.fits
+```
+
+Create those directories with:
+
+```bash
+mkdir -p /mnt/ceph/users/$USER/synthesizer_grids
+mkdir -p /mnt/ceph/users/$USER/euclid_desi_mocks/reference
+```
+
+The VIS transmission file is tracked in this repository and does not need to
+be copied separately.
+
+## Python environment
+
+Activate the Popeye environment containing the installed Synthesizer package
+and its compiled extensions. It must import:
+
+```bash
+python3 -c 'import astropy, h5py, illustris_python, joblib, numpy, pandas, scipy, unyt, yaml; import synthesizer; print("environment OK")'
+```
+
+If the correct executable is not the active `python3`, set it explicitly:
+
+```bash
+export POPEYE_PYTHON=/path/to/environment/bin/python
+```
+
+If `illustris_python` is a source checkout rather than installed, set:
+
+```bash
+export POPEYE_ILLUSTRIS_PYTHON_ROOT=/path/to/illustris_python
+```
+
+## Smoke test
+
+Use a separate output directory for a 16-object test:
+
+```bash
+cd /path/to/synthesizer/euclidVIS
+export POPEYE_OUTPUT_ROOT=/mnt/ceph/users/$USER/euclid_desi_mocks/smoke16_kappa0p0795
+./popeye_submit_matched.sh 16 42 4
+```
+
+This submits one serial selection job followed by a four-task production array.
+
+## Production run
+
+After the smoke test succeeds:
+
+```bash
+unset POPEYE_OUTPUT_ROOT
+./popeye_submit_matched.sh 1000 42 4
+```
+
+The default output is:
+
+```text
+/mnt/ceph/users/$USER/euclid_desi_mocks/tngmatched_kappa0p0795
+```
+
+The 1,000 objects are split into 250 four-galaxy array tasks. At most four
+tasks run simultaneously, using four full `gen` nodes and staying within the
+documented 4-node/256-core general-partition limit.
+
+Monitor the IDs printed by the submitter with `squeue`, or inspect:
+
+```text
+OUTPUT_ROOT/logs/select.JOBID.{out,err}
+OUTPUT_ROOT/logs/mocks.ARRAY_JOBID_TASKID.{out,err}
+```
+
+## Restarting
+
+The master selection and random orientations are deterministic for a fixed
+sample size and seed. Completed Euclid/raw-DESI pairs are skipped. Re-running
+the same submit command is therefore safe and regenerates only incomplete
+objects. Each array task writes its own manifest under `run_manifests/`; no
+cross-node process appends to a shared catalog.
+
+## Later DESI noise stage
+
+After generation finishes, enrich `matched_sample.csv` with mock fiber flux and
+the fiber SFR diagnostics stored in each raw FITS header. Then assign EDR donors
+using redshift, mass, fiber flux, and fiber sSFR before running
+`apply_edr_noise_to_existing_mocks.py`. This avoids assigning low-S/N donors to
+mocks whose brightness changed when `kappa` was updated.

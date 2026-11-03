@@ -1,0 +1,51 @@
+#!/bin/bash -l
+# Generate one balanced shard of the fixed selection manifest. The submission
+# helper supplies --array dynamically; four simultaneous tasks use Popeye's
+# four-node/256-core general-partition allowance.
+
+#SBATCH -J ED_MOCKS
+#SBATCH -p gen
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=0
+#SBATCH --time=24:00:00
+#SBATCH --exclusive
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}"
+
+INPUT_MANIFEST="${1:?Pass the master selection manifest}"
+N_SHARDS="${2:?Pass the total number of shards}"
+SEED="${3:-42}"
+PYTHON_BIN="${POPEYE_PYTHON:-python3}"
+TNG_PATH="${POPEYE_TNG_PATH:?Set POPEYE_TNG_PATH}"
+GRID_DIR="${POPEYE_GRID_DIR:?Set POPEYE_GRID_DIR}"
+REFERENCE_CATALOG="${POPEYE_REFERENCE_CATALOG:?Set POPEYE_REFERENCE_CATALOG}"
+OUTPUT_ROOT="${POPEYE_OUTPUT_ROOT:?Set POPEYE_OUTPUT_ROOT}"
+
+export OMP_NUM_THREADS=16
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export HDF5_USE_FILE_LOCKING=FALSE
+
+echo "Array task ${SLURM_ARRAY_TASK_ID}/${N_SHARDS}"
+echo "Manifest: ${INPUT_MANIFEST}"
+echo "Output:   ${OUTPUT_ROOT}"
+
+"${PYTHON_BIN}" ./generate_matched_sample.py \
+    --config ./config_popeye.yaml \
+    --tng_path "${TNG_PATH}" \
+    --grid_dir "${GRID_DIR}" \
+    --reference_catalog "${REFERENCE_CATALOG}" \
+    --output_path "${OUTPUT_ROOT}" \
+    --input_manifest "${INPUT_MANIFEST}" \
+    --seed "${SEED}" \
+    --shard_index "${SLURM_ARRAY_TASK_ID}" \
+    --n_shards "${N_SHARDS}" \
+    --n_jobs 4 \
+    --kappa 0.0795 \
+    --raw_spectra_only

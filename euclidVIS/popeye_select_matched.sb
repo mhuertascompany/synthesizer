@@ -1,0 +1,38 @@
+#!/bin/bash -l
+# Build one immutable z--mass matched selection manifest.
+
+#SBATCH -J ED_SELECT
+#SBATCH -p genx
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=32G
+#SBATCH --time=04:00:00
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}"
+
+N_MOCKS="${1:-1000}"
+SEED="${2:-42}"
+PYTHON_BIN="${POPEYE_PYTHON:-python3}"
+TNG_PATH="${POPEYE_TNG_PATH:?Set POPEYE_TNG_PATH}"
+GRID_DIR="${POPEYE_GRID_DIR:?Set POPEYE_GRID_DIR}"
+REFERENCE_CATALOG="${POPEYE_REFERENCE_CATALOG:?Set POPEYE_REFERENCE_CATALOG}"
+OUTPUT_ROOT="${POPEYE_OUTPUT_ROOT:?Set POPEYE_OUTPUT_ROOT}"
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export HDF5_USE_FILE_LOCKING=FALSE
+
+"${PYTHON_BIN}" ./generate_matched_sample.py \
+    --config ./config_popeye.yaml \
+    --tng_path "${TNG_PATH}" \
+    --grid_dir "${GRID_DIR}" \
+    --reference_catalog "${REFERENCE_CATALOG}" \
+    --output_path "${OUTPUT_ROOT}" \
+    --n_mocks "${N_MOCKS}" \
+    --seed "${SEED}" \
+    --selection_only \
+    --skip_donor_assignment

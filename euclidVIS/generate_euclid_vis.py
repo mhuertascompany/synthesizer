@@ -892,13 +892,16 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     # Revert target_galaxy after processing (optional but cleaner)
     target_galaxy.stars, target_galaxy.gas = original_stars, original_gas
 
-    # 4. Update Catalog
-    cat_path = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", "catalog.csv")
-    write_header = not os.path.exists(cat_path)
-    with open(cat_path, 'a') as f:
-        if write_header:
-            f.write("subhalo_id,redshift,stellar_mass\n")
-        f.write(f"{subhalo_id},{z_obs:.6f},{stellar_mass:.4e}\n")
+    # 4. Update the legacy per-snapshot catalog when requested. Large Slurm
+    # arrays disable this and use immutable selection/shard manifests instead,
+    # avoiding concurrent cross-node appends to one file.
+    if opt.get('write_catalog', True):
+        cat_path = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", "catalog.csv")
+        write_header = not os.path.exists(cat_path)
+        with open(cat_path, 'a') as f:
+            if write_header:
+                f.write("subhalo_id,redshift,stellar_mass\n")
+            f.write(f"{subhalo_id},{z_obs:.6f},{stellar_mass:.4e}\n")
 
 def process_single_galaxy_wrapper(subhalo_id, config, grid, vis_filter, model):
     """Wrapper for processing a single galaxy in a parallel worker."""
@@ -912,9 +915,17 @@ def process_single_galaxy_wrapper(subhalo_id, config, grid, vis_filter, model):
         expected_outputs = [expected_file]
         if config.get('desi', {}).get('enabled', False):
             desi_subdir = paths.get('desi_subdir', 'DESI')
+            noise_model = str(
+                config.get('desi', {}).get('noise_model', 'gaussian')
+            ).lower()
+            desi_filename = (
+                f"desi_spectrum_{subhalo_id}_raw.fits"
+                if noise_model in {'none', 'raw'}
+                else f"desi_spectrum_{subhalo_id}.fits"
+            )
             expected_outputs.append(os.path.join(
                 paths['output_path'], f"sn{snap_number}", desi_subdir,
-                f"desi_spectrum_{subhalo_id}.fits",
+                desi_filename,
             ))
         
         force = config.get('optimization', {}).get('force_overwrite', False)
@@ -941,9 +952,14 @@ def process_single_galaxy_wrapper(subhalo_id, config, grid, vis_filter, model):
 
         galaxy = galaxies[0]
         
-        # Unconditional seeding for workers to ensure unique randomness across runs
-        # mixing subhalo_id and nano-time to maximize divergence
-        worker_seed = int((int(subhalo_id) * 31 + int(time.time() * 1000000)) % 4294967295)
+        # Deterministic worker seeding makes random projections reproducible
+        # after a preemption or shard retry.
+        base_seed = int(config.get('sample', {}).get('seed', 42))
+        worker_seed = int(np.random.SeedSequence([
+            base_seed,
+            int(snap_number),
+            int(subhalo_id),
+        ]).generate_state(1, dtype=np.uint32)[0])
         np.random.seed(worker_seed)
         print(f"Subhalo {subhalo_id}: Worker seeded with {worker_seed}", flush=True)
 

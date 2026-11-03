@@ -1,0 +1,69 @@
+# Popeye/Rusty production configuration for the Euclid-DEEP/DESI matched run.
+# Machine-specific paths are overridden by popeye_submit_matched.sh.
+
+paths:
+  tng_path: "/mnt/sdceph/users/sgenel/Illustris_IllustrisTNG_public_data_release/TNG50-1/output"
+  grid_dir: "/mnt/ceph/users/mhuertas/synthesizer_grids"
+  output_path: "/mnt/ceph/users/mhuertas/euclid_desi_mocks/tngmatched_kappa0p0795"
+  reference_catalog: "/mnt/ceph/users/mhuertas/euclid_desi_mocks/reference/catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.1.fits"
+  filter_file: "Euclid_VIS.vis.dat"
+  euclid_subdir: "Euclid_raw_and_psf"
+  desi_subdir: "DESI"
+
+sample:
+  n_mocks: 1000
+  seed: 42
+  z_min: 0.0
+  z_max: 1.5
+  log_mass_min: 9.5
+  log_mass_max: 14.0
+  reference_redshift_column: "phz_pp_median_redshift"
+  reference_mass_column: "phz_pp_median_stellarmass"
+  reference_selection_column: "chosen_survey"
+  reference_selection_value: "DEEP"
+  redshift_bin_width: 0.02
+  mass_bin_width: 0.05
+  log_ssfr_floor: -13.0
+  allowed_snapshots: [40, 50, 59, 67, 72, 78, 84, 91, 99]
+  selection_manifest: "matched_sample.csv"
+
+simulation:
+  grid_name: "bc03-2016-Miles_chabrier-0.1,100_cloudy-c23.01-sps"
+
+observation:
+  fov_kpc: 50.0
+  pixel_scale_arcsec: 0.1
+  fwhm_arcsec: 0.16
+
+model:
+  kappa: 0.0795
+  dust_to_metal: 0.4
+  dust_curve: "Calzetti2000"
+  vel_shift: true
+
+optimization:
+  particle_limit: -1
+  chunk_size: 2500
+  nthreads_spectra: 16
+  nthreads_tau_v: 16
+  n_jobs: 4
+  force_overwrite: false
+  # The immutable master/shard manifests replace concurrent catalog.csv writes.
+  write_catalog: false
+
+desi:
+  enabled: true
+  fiber_diameter_arcsec: 1.5
+  # Generate the expensive intrinsic products first. Empirical EDR noise is a
+  # separate, inexpensive stage after fiber flux/SFR donor matching.
+  noise_model: "none"
+  lam_min: 3600.0
+  lam_max: 9800.0
+  d_lam: 0.1
+  R_min: 2000.0
+  R_max: 5000.0
+
+projection:
+  type: "random"
+  phi: 0.0
+  theta: 0.0

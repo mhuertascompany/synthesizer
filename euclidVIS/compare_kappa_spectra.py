@@ -125,8 +125,10 @@ def main():
 
     for color, record in zip(colors, records):
         label = rf"$\kappa={record['kappa']:g}$"
+        desi_range = (record["wave"] >= 3600.0) & (record["wave"] <= 9800.0)
         full_axis.plot(
-            record["wave"], record["fnu"] / MICROJY_CGS,
+            record["wave"][desi_range],
+            record["fnu"][desi_range] / MICROJY_CGS,
             color=color, lw=0.8, label=label,
         )
         for axis, (name, (center, half_width)) in zip(line_axes, LINE_WINDOWS.items()):
@@ -141,6 +143,7 @@ def main():
         xlabel=r"Observed wavelength [$\AA$]",
         ylabel=r"Raw fiber $f_\nu$ [$\mu$Jy]",
         title=f"Subhalo {next(iter(subhalos))}: dust-opacity comparison",
+        xlim=(3600.0, 9800.0),
     )
     full_axis.legend(ncol=len(records), frameon=False)
     full_axis.grid(alpha=0.2)

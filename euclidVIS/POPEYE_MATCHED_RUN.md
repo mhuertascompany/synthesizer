@@ -134,10 +134,46 @@ the same submit command is therefore safe and regenerates only incomplete
 objects. Each array task writes its own manifest under `run_manifests/`; no
 cross-node process appends to a shared catalog.
 
-## Later DESI noise stage
+## DESI instrument and noise post-processing
 
-After generation finishes, enrich `matched_sample.csv` with mock fiber flux and
-the fiber SFR diagnostics stored in each raw FITS header. Then assign EDR donors
-using redshift, mass, fiber flux, and fiber sSFR before running
-`apply_edr_noise_to_existing_mocks.py`. This avoids assigning low-S/N donors to
-mocks whose brightness changed when `kappa` was updated.
+The intrinsic spectra are intentionally preserved as
+`desi_spectrum_<subhalo>_raw.fits`. A separate environment contains feasiBGS
+and the DESI simulation stack:
+
+```text
+/mnt/home/$USER/.venvs/desi-noise
+/mnt/home/$USER/python/feasiBGS
+/mnt/sdceph/users/$USER/desimodel/data
+```
+
+Run the synthetic B/R/Z exposure smoke test before submitting real spectra:
+
+```bash
+module load python/3.11.11
+export DESIMODEL=/mnt/sdceph/users/$USER/desimodel
+export PYTHONPATH=/mnt/home/$USER/python/feasiBGS:$PWD
+/mnt/home/$USER/.venvs/desi-noise/bin/python check_feasibgs.py
+```
+
+Then test one existing high-resolution mock. The fourth argument limits the
+post-processing to the first manifest row:
+
+```bash
+./popeye_submit_desi_instrument.sh \
+  /path/to/OUTPUT_ROOT/matched_sample.csv \
+  /path/to/OUTPUT_ROOT \
+  1 1
+```
+
+The default model is one 180-second bright-time exposure with airmass 1.1 and
+1.1-arcsec seeing. It applies DESI throughput, camera-dependent line-spread
+functions, sky/source/detector noise, and writes standard B/R/Z `FLUX`, `IVAR`,
+`MASK`, and `RESOLUTION` extensions. The final primary header contains
+`FEASIBGS=True` and `NOISEMOD=FEASIBGS`. The raw spectrum is never changed.
+
+After inspecting this physical-noise baseline, the survey-matched alternative
+is to enrich `matched_sample.csv` with mock fiber flux and the fiber SFR
+diagnostics stored in each raw FITS header. Assign EDR donors using redshift,
+mass, fiber flux, and fiber sSFR before running
+`apply_edr_noise_to_existing_mocks.py`. That later stage keeps the DESI response
+but replaces the simulated variance with the matched donor IVAR and mask.

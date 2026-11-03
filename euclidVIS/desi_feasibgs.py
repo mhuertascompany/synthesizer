@@ -94,6 +94,12 @@ def simulate_feasibgs_exposure(
     metadata=None,
 ):
     """Simulate and write one noisy DESI B/R/Z exposure with feasiBGS."""
+    # feasiBGS still uses ``np.in1d``, which was removed in NumPy 2.4.  Keep
+    # the modern DESI stack on its supported NumPy release and provide the
+    # equivalent compatibility alias at the adapter boundary.
+    if not hasattr(np, "in1d"):
+        np.in1d = np.isin
+
     try:
         from feasibgs import forwardmodel as forwardmodel
         from feasibgs import skymodel as skymodel
@@ -166,6 +172,11 @@ def simulate_feasibgs_exposure(
                 header["DONPROG"] = (
                     str(config.get("empirical_noise_donor_program", "UNKNOWN"))[:8],
                     "EDR noise donor program",
+                )
+            else:
+                header["NOISEMOD"] = (
+                    "NONE" if bool(config.get("no_noise", False)) else "FEASIBGS",
+                    "Noise realization applied to DESI cameras",
                 )
             for key, value in (metadata or {}).items():
                 header[key] = value

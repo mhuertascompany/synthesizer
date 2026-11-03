@@ -4,6 +4,7 @@
 
 #SBATCH -J DESI_DR1_NOISE
 #SBATCH -p genx
+#SBATCH --constraint=rocky9
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8

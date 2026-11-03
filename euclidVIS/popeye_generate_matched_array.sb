@@ -5,6 +5,7 @@
 
 #SBATCH -J ED_MOCKS
 #SBATCH -p gen
+#SBATCH --constraint=rocky9
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=64

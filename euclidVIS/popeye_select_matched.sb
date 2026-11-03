@@ -3,6 +3,7 @@
 
 #SBATCH -J ED_SELECT
 #SBATCH -p genx
+#SBATCH --constraint=rocky9
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=32G

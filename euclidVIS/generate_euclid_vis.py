@@ -31,6 +31,73 @@ from desi_feasibgs import simulate_feasibgs_exposure
 
 MICROJY_CGS = 1e-29  # 1 microJy in erg / s / cm^2 / Hz
 
+DEFAULT_EUCLID_FILTERS = {
+    'VIS': 'Euclid_VIS.vis.dat',
+    'NISP_Y': 'Euclid_NISP.Y.dat',
+    'NISP_J': 'Euclid_NISP.J.dat',
+    'NISP_H': 'Euclid_NISP.H.dat',
+}
+SVO_EUCLID_FILTER_CODES = {
+    'VIS': 'Euclid/VIS.vis',
+    'NISP_Y': 'Euclid/NISP.Y',
+    'NISP_J': 'Euclid/NISP.J',
+    'NISP_H': 'Euclid/NISP.H',
+}
+
+
+def euclid_image_filename(band, subhalo_id, raw=True):
+    """Return the stable output filename for one Euclid imaging band."""
+    suffix = '_raw' if raw else ''
+    return f'euclid_{band.lower()}_{subhalo_id}{suffix}.fits'
+
+
+def load_euclid_filters(config, grid):
+    """Load local Euclid VIS/NISP passbands, falling back to SVO if absent."""
+    paths = config['paths']
+    configured = paths.get('filter_files')
+    if configured is None:
+        # Preserve the legacy VIS-only configuration used by older jobs.
+        configured = {'VIS': paths.get('filter_file', 'Euclid_VIS.vis.dat')}
+
+    filter_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), '..', 'filters')
+    )
+    filters = {}
+    for band, filter_name in configured.items():
+        candidates = []
+        if os.path.isabs(filter_name):
+            candidates.append(filter_name)
+        else:
+            candidates.extend([
+                os.path.join(paths['grid_dir'], filter_name),
+                os.path.join(filter_dir, filter_name),
+            ])
+        local_filter = next(
+            (candidate for candidate in candidates if os.path.isfile(candidate)),
+            None,
+        )
+        if local_filter is not None:
+            curve = np.loadtxt(local_filter)
+            euclid_filter = Filter(
+                f'Euclid/{band}_local',
+                transmission=curve[:, 1],
+                new_lam=curve[:, 0] * Angstrom,
+            )
+            euclid_filter._interpolate_wavelength(grid.lam)
+        else:
+            try:
+                filter_code = SVO_EUCLID_FILTER_CODES[band]
+            except KeyError as exc:
+                raise FileNotFoundError(
+                    f'No local curve found for unknown Euclid band {band}: '
+                    f'{filter_name}'
+                ) from exc
+            euclid_filter = FilterCollection(
+                filter_codes=[filter_code], new_lam=grid.lam
+            )[0]
+        filters[band] = euclid_filter
+    return filters
+
 
 def band_averaged_fnu(fnu, nu, transmission):
     """Return band-averaged F_nu using Synthesizer's filter convention."""
@@ -45,7 +112,7 @@ def band_averaged_fnu(fnu, nu, transmission):
         x=band_nu,
     )
     if denominator == 0:
-        raise ValueError("Euclid VIS filter has zero integrated transmission")
+        raise ValueError("Euclid filter has zero integrated transmission")
 
     numerator = np.trapezoid(
         fnu[..., in_band] * band_transmission / band_nu,
@@ -353,7 +420,7 @@ def safe_rotate(component, phi=None, theta=None, proj_type='manual'):
         if vels_none:
             component.velocities = None
 
-def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
+def process_galaxy(target_galaxy, subhalo_id, grid, euclid_filters, model, config):
     """Core logic to process a single galaxy and save its outputs."""
     obs = config['observation']
     mod = config['model']
@@ -433,8 +500,19 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     # FOV and Resolution
     fov_kpc = obs['fov_kpc']
     fov_arcsec = fov_kpc / scale_kpc_per_arcsec
-    pixel_scale_arcsec = obs['pixel_scale_arcsec']
-    resolution = int(fov_arcsec / pixel_scale_arcsec)
+    if not isinstance(euclid_filters, dict):
+        # Backward compatibility for callers that pass the legacy VIS filter.
+        euclid_filters = {'VIS': euclid_filters}
+    default_pixel_scale = obs.get('pixel_scale_arcsec', 0.1)
+    configured_pixel_scales = obs.get('band_pixel_scales_arcsec', {})
+    pixel_scales = {
+        band: float(configured_pixel_scales.get(band, default_pixel_scale))
+        for band in euclid_filters
+    }
+    resolutions = {
+        band: max(1, int(fov_arcsec / pixel_scale))
+        for band, pixel_scale in pixel_scales.items()
+    }
     
     # Filtering and Downsampling
     particle_limit = opt.get('particle_limit', -1)
@@ -525,7 +603,10 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     # chunk_size and num_stars already defined above
     
     # Aggregators
-    hist_total = np.zeros((resolution, resolution))
+    hist_totals = {
+        band: np.zeros((resolution, resolution))
+        for band, resolution in resolutions.items()
+    }
     lnu_fiber_total = None
     lam_obs = None
     
@@ -576,16 +657,24 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         else:
             print(f"  DESI DIAGNOSTIC: min(r_arcsec) = {np.min(r_arcsec):.3f}", flush=True)
 
-    # Pre-calculate Euclid VIS transmission curve for interpolation
-    # We'll do this once outside the loop
-    # dummy_grid loaded just to get wavelength bins
-    vis_filter_lam = vis_filter.lam.to(Angstrom).value
-    vis_filter_trans = vis_filter.transmission
-    
-    # Pre-calculate filter transmission at the spectral grid points (redshifted)
-    # This is constant for all stars in the galaxy
+    # Pre-calculate every Euclid transmission at the redshifted grid points.
+    # Particle spectra are generated only once and integrated through all bands.
     lam_rest_grid = grid.lam.to(Angstrom).value
-    t_rest = np.interp(lam_rest_grid * (1 + z_obs), vis_filter_lam, vis_filter_trans, left=0, right=0)
+    transmissions = {}
+    for band, euclid_filter in euclid_filters.items():
+        filter_lam = euclid_filter.lam.to(Angstrom).value
+        transmissions[band] = np.interp(
+            lam_rest_grid * (1 + z_obs),
+            filter_lam,
+            euclid_filter.transmission,
+            left=0,
+            right=0,
+        )
+        if not np.any(transmissions[band] > 0):
+            raise ValueError(
+                f'{band} has no wavelength overlap at z={z_obs:.4f}; '
+                'check the grid wavelength coverage'
+            )
     
     print(f"  Calculating spectra in chunks of {chunk_size} (total {num_stars} stars)...", flush=True)
 
@@ -653,7 +742,7 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             else:
                 if i == 0: print("      DIAGNOSTIC: Spectral grid missing H-alpha or continuum range.", flush=True)
         
-        # --- Euclid VIS photometry ---
+        # --- Euclid VIS and NISP photometry ---
         nu_rest = particle_spectra.nu.to('Hz').value
         lnu_rest = particle_spectra.lnu.to('erg/s/Hz').value
 
@@ -665,22 +754,21 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
             * (1 + z_obs)
             / (4 * np.pi * d_lum.value**2)
         )
-        chunk_fnu_microjy = (
-            band_averaged_fnu(fnu_obs, nu_rest, t_rest)
-            / MICROJY_CGS
-            * star_weight_scale
-        )
-        
-        # Histogram accumulation
         chunk_coords = coords_for_img[i:end]
-        hist_chunk, _, _ = np.histogram2d(
-            chunk_coords[:, 0].to(kpc).value, 
-            chunk_coords[:, 1].to(kpc).value, 
-            bins=resolution, 
-            range=[[-fov_kpc/2, fov_kpc/2], [-fov_kpc/2, fov_kpc/2]], 
-            weights=chunk_fnu_microjy
-        )
-        hist_total += hist_chunk
+        for band, transmission in transmissions.items():
+            chunk_fnu_microjy = (
+                band_averaged_fnu(fnu_obs, nu_rest, transmission)
+                / MICROJY_CGS
+                * star_weight_scale
+            )
+            hist_chunk, _, _ = np.histogram2d(
+                chunk_coords[:, 0].to(kpc).value,
+                chunk_coords[:, 1].to(kpc).value,
+                bins=resolutions[band],
+                range=[[-fov_kpc/2, fov_kpc/2], [-fov_kpc/2, fov_kpc/2]],
+                weights=chunk_fnu_microjy,
+            )
+            hist_totals[band] += hist_chunk
         
         # --- DESI Fiber Integration ---
         if desi_mask_global is not None:
@@ -742,8 +830,8 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
     euclid_dir = os.path.join(paths['output_path'], f"sn{config['simulation']['snap_number']}", euclid_subdir)
     os.makedirs(euclid_dir, exist_ok=True)
     
-    def add_euclid_header(hdu, image_type):
-        """Attach photometric and provenance metadata to a VIS image."""
+    def add_euclid_header(hdu, band, image_type):
+        """Attach photometric and provenance metadata to a Euclid image."""
         hdu.header['OBJECT'] = f"Subhalo {subhalo_id}"
         hdu.header['REDSHIFT'] = z_obs
         hdu.header['SUBHALO'] = subhalo_id
@@ -757,31 +845,50 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
         hdu.header['VELSHIFT'] = mod.get('vel_shift', False)
         hdu.header['BUNIT'] = 'uJy'
         hdu.header['PHOTSYS'] = 'AB'
-        hdu.header['PIXSCALE'] = pixel_scale_arcsec
+        hdu.header['INSTRUME'] = 'VIS' if band == 'VIS' else 'NISP'
+        hdu.header['FILTER'] = band
+        hdu.header['PIXSCALE'] = pixel_scales[band]
         hdu.header['IMTYPE'] = image_type
 
-    # Raw, pre-PSF image. Use this product when MER applies its exposure PSF.
-    raw_hdu = fits.PrimaryHDU(hist_total)
-    add_euclid_header(raw_hdu, 'PRE_PSF')
-    raw_hdu.writeto(
-        os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}_raw.fits"),
-        overwrite=True,
-    )
-    
-    # Convolved Image
-    sigma_pixels = (obs['fwhm_arcsec'] / 2.355) / pixel_scale_arcsec
-    img_convolved = gaussian_filter(hist_total, sigma=sigma_pixels)
-    hdu = fits.PrimaryHDU(img_convolved)
-    add_euclid_header(hdu, 'PSF_CONV')
-    hdu.writeto(os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}.fits"), overwrite=True)
-    total_fnu_microjy = np.sum(hist_total)
-    if total_fnu_microjy > 0:
-        total_abmag = 23.9 - 2.5 * np.log10(total_fnu_microjy)
-        print(
-            f"  Euclid VIS total flux: {total_fnu_microjy:.4g} uJy "
-            f"(AB={total_abmag:.3f})",
-            flush=True,
+    save_psf_convolved = bool(obs.get('save_psf_convolved', True))
+    configured_fwhm = obs.get('band_fwhm_arcsec', {})
+    for band, image in hist_totals.items():
+        # Raw means noiseless and pre-PSF. Instrumental effects are deliberately
+        # deferred to the post-processing stage.
+        raw_hdu = fits.PrimaryHDU(image)
+        add_euclid_header(raw_hdu, band, 'PRE_PSF')
+        raw_hdu.writeto(
+            os.path.join(
+                euclid_dir, euclid_image_filename(band, subhalo_id, raw=True)
+            ),
+            overwrite=True,
         )
+
+        if save_psf_convolved:
+            fwhm_arcsec = float(
+                configured_fwhm.get(band, obs.get('fwhm_arcsec', 0.16))
+            )
+            sigma_pixels = (fwhm_arcsec / 2.355) / pixel_scales[band]
+            convolved_hdu = fits.PrimaryHDU(
+                gaussian_filter(image, sigma=sigma_pixels)
+            )
+            add_euclid_header(convolved_hdu, band, 'PSF_CONV')
+            convolved_hdu.writeto(
+                os.path.join(
+                    euclid_dir,
+                    euclid_image_filename(band, subhalo_id, raw=False),
+                ),
+                overwrite=True,
+            )
+
+        total_fnu_microjy = np.sum(image)
+        if total_fnu_microjy > 0:
+            total_abmag = 23.9 - 2.5 * np.log10(total_fnu_microjy)
+            print(
+                f"  Euclid {band} total flux: {total_fnu_microjy:.4g} uJy "
+                f"(AB={total_abmag:.3f})",
+                flush=True,
+            )
     print(f"  Euclid images saved to {euclid_dir}", flush=True)
 
     # --- 5. DESI Output ---
@@ -912,7 +1019,7 @@ def process_galaxy(target_galaxy, subhalo_id, grid, vis_filter, model, config):
                 f.write("subhalo_id,redshift,stellar_mass\n")
             f.write(f"{subhalo_id},{z_obs:.6f},{stellar_mass:.4e}\n")
 
-def process_single_galaxy_wrapper(subhalo_id, config, grid, vis_filter, model):
+def process_single_galaxy_wrapper(subhalo_id, config, grid, euclid_filters, model):
     """Wrapper for processing a single galaxy in a parallel worker."""
     try:
         # Check if output already exists (Idempotency)
@@ -920,8 +1027,26 @@ def process_single_galaxy_wrapper(subhalo_id, config, grid, vis_filter, model):
         snap_number = config['simulation']['snap_number']
         euclid_subdir = paths.get('euclid_subdir', 'Euclid')
         euclid_dir = os.path.join(paths['output_path'], f"sn{snap_number}", euclid_subdir)
-        expected_file = os.path.join(euclid_dir, f"euclid_vis_{subhalo_id}.fits")
-        expected_outputs = [expected_file]
+        bands = (
+            list(euclid_filters)
+            if isinstance(euclid_filters, dict)
+            else ['VIS']
+        )
+        expected_outputs = [
+            os.path.join(
+                euclid_dir,
+                euclid_image_filename(band, subhalo_id, raw=True),
+            )
+            for band in bands
+        ]
+        if config.get('observation', {}).get('save_psf_convolved', True):
+            expected_outputs.extend(
+                os.path.join(
+                    euclid_dir,
+                    euclid_image_filename(band, subhalo_id, raw=False),
+                )
+                for band in bands
+            )
         if config.get('desi', {}).get('enabled', False):
             desi_subdir = paths.get('desi_subdir', 'DESI')
             noise_model = str(
@@ -979,7 +1104,7 @@ def process_single_galaxy_wrapper(subhalo_id, config, grid, vis_filter, model):
             z_rand = float(np.random.uniform(z_min, z_max))
             obs_conf['z_obs'] = z_rand
             
-        process_galaxy(galaxy, subhalo_id, grid, vis_filter, model, config)
+        process_galaxy(galaxy, subhalo_id, grid, euclid_filters, model, config)
         return f"Subhalo {subhalo_id}: Success."
         
     except Exception as e:
@@ -1027,13 +1152,11 @@ def generate_euclid_vis_image(config):
         print(f"  GRID DIAGNOSTIC: available lines={len(grid.available_line_emissions)}", flush=True)
 
     
-    vis_filter = None
-    local_filter = os.path.join(paths['grid_dir'], paths.get('filter_file', 'Euclid_VIS.vis.dat'))
-    if os.path.exists(local_filter):
-        vis_filter = Filter("Euclid/VIS_local", transmission=np.loadtxt(local_filter)[:, 1], new_lam=np.loadtxt(local_filter)[:, 0] * Angstrom)
-        vis_filter._interpolate_wavelength(grid.lam)
-    else:
-        vis_filter = FilterCollection(filter_codes=["Euclid/VIS.vis"], new_lam=grid.lam)[0]
+    euclid_filters = load_euclid_filters(config, grid)
+    print(
+        '  Euclid imaging bands: ' + ', '.join(euclid_filters),
+        flush=True,
+    )
 
     # Fixing missing emission lines: Standard reprocessed model works for this grid
     # No manual U fix or escape overrides needed as confirmed by diagnostics
@@ -1046,7 +1169,7 @@ def generate_euclid_vis_image(config):
     
     results = Parallel(n_jobs=n_jobs)(
         delayed(process_single_galaxy_wrapper)(
-            subhalo_id, config, grid, vis_filter, model
+            subhalo_id, config, grid, euclid_filters, model
         ) for subhalo_id in tqdm(candidates)
     )
     

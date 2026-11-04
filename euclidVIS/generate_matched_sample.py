@@ -13,15 +13,16 @@ import pandas as pd
 import yaml
 from astropy.io import fits
 from joblib import Parallel, delayed
-from unyt import Angstrom
 
 from synthesizer.emission_models import AttenuatedEmission, ReprocessedEmission
 from synthesizer.emission_models.attenuation import Calzetti2000
 from synthesizer.grid import Grid
-from synthesizer.instruments.filters import Filter, FilterCollection
 
 from edr_empirical_noise import assign_noise_donors
-from generate_euclid_vis import process_single_galaxy_wrapper
+from generate_euclid_vis import (
+    load_euclid_filters,
+    process_single_galaxy_wrapper,
+)
 
 
 EMPIRICAL_DESI_NOISE_MODELS = {
@@ -312,38 +313,17 @@ def load_shared_resources(config):
         config["simulation"]["grid_name"],
         grid_dir=paths["grid_dir"],
     )
-    filter_name = paths.get("filter_file", "Euclid_VIS.vis.dat")
-    filter_candidates = [Path(paths["grid_dir"]) / filter_name]
-    if not Path(filter_name).is_absolute():
-        filter_candidates.append(
-            Path(__file__).resolve().parents[1] / "filters" / filter_name
-        )
-    local_filter = next(
-        (candidate for candidate in filter_candidates if candidate.is_file()),
-        None,
-    )
-    if local_filter is not None:
-        curve = np.loadtxt(local_filter)
-        vis_filter = Filter(
-            "Euclid/VIS_local",
-            transmission=curve[:, 1],
-            new_lam=curve[:, 0] * Angstrom,
-        )
-        vis_filter._interpolate_wavelength(grid.lam)
-    else:
-        vis_filter = FilterCollection(
-            filter_codes=["Euclid/VIS.vis"], new_lam=grid.lam
-        )[0]
+    euclid_filters = load_euclid_filters(config, grid)
     model = AttenuatedEmission(
         grid=grid,
         dust_curve=Calzetti2000(),
         apply_to=ReprocessedEmission(grid=grid),
         emitter="stellar",
     )
-    return grid, vis_filter, model
+    return grid, euclid_filters, model
 
 
-def process_target(row, base_config, grid, vis_filter, model):
+def process_target(row, base_config, grid, euclid_filters, model):
     config = copy.deepcopy(base_config)
     config["simulation"]["snap_number"] = int(row.snapshot)
     config["simulation"]["batch"] = False
@@ -359,7 +339,7 @@ def process_target(row, base_config, grid, vis_filter, model):
             row.noise_donor_program
         )
     return process_single_galaxy_wrapper(
-        int(row.subhalo_id), config, grid, vis_filter, model
+        int(row.subhalo_id), config, grid, euclid_filters, model
     )
 
 
@@ -545,7 +525,7 @@ def main():
                 f"missing:\n{preview}"
             )
 
-    grid, vis_filter, model = load_shared_resources(config)
+    grid, euclid_filters, model = load_shared_resources(config)
     n_jobs = int(config["optimization"].get("n_jobs", 1))
     # Targets are sorted by snapshot above for filesystem/cache locality, but
     # all targets share one global queue. Workers may cross a snapshot boundary
@@ -557,7 +537,7 @@ def main():
         flush=True,
     )
     results = Parallel(n_jobs=n_jobs)(
-        delayed(process_target)(row, config, grid, vis_filter, model)
+        delayed(process_target)(row, config, grid, euclid_filters, model)
         for row in targets.itertuples(index=False)
     )
     for result in results:

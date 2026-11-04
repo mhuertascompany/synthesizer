@@ -4,11 +4,11 @@ This workflow draws a fixed sample from the Euclid-DEEP objects in the matched
 DESI--Euclid catalog, with `z < 1.5` and `log10(Mstar/Msun) > 9.5`. TNG50
 subhalos are matched in redshift and stellar mass. Products use `kappa=0.0795`,
 the Calzetti attenuation curve, velocity-shifted particle spectra, a 1.5-arcsec
-DESI fiber, and the Euclid VIS image configuration.
+DESI fiber, and Euclid VIS plus NISP Y/J/H imaging.
 
-The expensive production stage writes raw Euclid images and raw DESI spectra.
-Empirical DESI DR1 noise is intentionally deferred until mock fiber fluxes and
-fiber SFRs are available for donor matching.
+The expensive production stage writes noiseless, pre-PSF Euclid images and
+high-resolution intrinsic DESI-fiber spectra. PSFs, detector/background noise,
+and empirical DESI DR1 noise are intentionally deferred to post-processing.
 
 ## Required inputs
 
@@ -23,7 +23,7 @@ the reference catalog is private):
 
 ```text
 /mnt/sdceph/users/$USER/synthesizer_grids/
-  bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res_1200-11000A.hdf5
+  bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res_1200-22000A.hdf5
 
 /mnt/sdceph/users/$USER/euclid_desi_mocks/reference/
   catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.1.fits
@@ -36,16 +36,16 @@ mkdir -p /mnt/sdceph/users/$USER/synthesizer_grids
 mkdir -p /mnt/sdceph/users/$USER/euclid_desi_mocks/reference
 ```
 
-The VIS transmission file is tracked in this repository and does not need to
-be copied separately.
+The VIS and NISP Y/J/H transmission files are tracked in this repository and
+do not need to be copied separately.
 
 ### Preparing the high-resolution grid
 
 The DESI production workflow uses official Syndex release 241, whose native
 optical wavelength grid has approximately constant `R=5450`. The complete grid
 is 8.3 GB and spans wavelengths irrelevant to this project. Download it once,
-verify the published SHA-256, then make a physical 1200--11000 Angstrom
-rest-frame subset:
+verify the published SHA-256, then make a physical 1200--22000 Angstrom
+rest-frame subset. The long-wavelength limit is required by NISP-H:
 
 ```bash
 cd /mnt/sdceph/users/$USER/synthesizer_grids
@@ -59,8 +59,8 @@ mv bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res.hdf5.part \
 
 python3 /mnt/home/$USER/python/synthesizer/euclidVIS/trim_synthesizer_grid.py \
   bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res.hdf5 \
-  bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res_1200-11000A.hdf5 \
-  --lam-min 1200 --lam-max 11000
+  bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res_1200-22000A.hdf5 \
+  --lam-min 1200 --lam-max 22000
 ```
 
 Do not replace this with an interpolation of the older `R=300` grid: a finer
@@ -119,6 +119,22 @@ The 1,000 objects are split into 250 four-galaxy array tasks. At most four
 tasks run simultaneously, using four full `gen` nodes and staying within the
 documented 4-node/256-core general-partition limit.
 
+For every selected galaxy, the intrinsic stage writes:
+
+```text
+sn<snapshot>/Euclid_noiseless/euclid_vis_<subhalo>_raw.fits
+sn<snapshot>/Euclid_noiseless/euclid_nisp_y_<subhalo>_raw.fits
+sn<snapshot>/Euclid_noiseless/euclid_nisp_j_<subhalo>_raw.fits
+sn<snapshot>/Euclid_noiseless/euclid_nisp_h_<subhalo>_raw.fits
+sn<snapshot>/DESI/desi_spectrum_<subhalo>_raw.fits
+```
+
+All four images are in microJy per pixel (`BUNIT=uJy`) and have
+`IMTYPE=PRE_PSF`. VIS uses 0.1 arcsec/pixel; NISP uses 0.3 arcsec/pixel. The
+spectrum is an observed-frame, 1.5-arcsec fiber `F_nu` spectrum. This workflow
+does not generate NISP slitless/grism spectra; that requires a separate
+dispersion/PSF/contamination forward model.
+
 Monitor the IDs printed by the submitter with `squeue`, or inspect:
 
 ```text
@@ -129,7 +145,7 @@ OUTPUT_ROOT/logs/mocks.ARRAY_JOBID_TASKID.{out,err}
 ## Restarting
 
 The master selection and random orientations are deterministic for a fixed
-sample size and seed. Completed Euclid/raw-DESI pairs are skipped. Re-running
+sample size and seed. Completed four-band Euclid/raw-DESI sets are skipped. Re-running
 the same submit command is therefore safe and regenerates only incomplete
 objects. Each array task writes its own manifest under `run_manifests/`; no
 cross-node process appends to a shared catalog.

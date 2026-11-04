@@ -35,9 +35,10 @@ export POPEYE_OUTPUT_ROOT="$PROD"
 ./popeye_submit_matched.sh 1000 42 4
 ```
 
-This writes `matched_sample.csv`, Euclid images, and high-resolution
-`desi_spectrum_<subhalo>_raw.fits` products. It does not add DESI noise. The
-printed Slurm array is limited to four simultaneous full nodes.
+This writes `matched_sample.csv`, noiseless pre-PSF VIS/NISP Y/J/H images, and
+high-resolution `desi_spectrum_<subhalo>_raw.fits` products. It does not add
+image PSFs/noise or DESI instrument effects/noise. The printed Slurm array is
+limited to four simultaneous full nodes.
 
 After the array completes, verify the raw count:
 

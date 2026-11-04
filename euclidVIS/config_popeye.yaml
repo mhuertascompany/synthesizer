@@ -6,8 +6,12 @@ paths:
   grid_dir: "/mnt/sdceph/users/mhuertas/synthesizer_grids"
   output_path: "/mnt/sdceph/users/mhuertas/euclid_desi_mocks/tngmatched_kappa0p0795"
   reference_catalog: "/mnt/sdceph/users/mhuertas/euclid_desi_mocks/reference/catalog_MER_DR1_DESI_DR1_combined_wide_deep_v1.1.fits"
-  filter_file: "Euclid_VIS.vis.dat"
-  euclid_subdir: "Euclid_raw_and_psf"
+  filter_files:
+    VIS: "Euclid_VIS.vis.dat"
+    NISP_Y: "Euclid_NISP.Y.dat"
+    NISP_J: "Euclid_NISP.J.dat"
+    NISP_H: "Euclid_NISP.H.dat"
+  euclid_subdir: "Euclid_noiseless"
   desi_subdir: "DESI"
 
 sample:
@@ -29,13 +33,21 @@ sample:
 
 simulation:
   # Physically trimmed from official Syndex release 241. The retained
-  # 1200-11000 A rest-frame interval has R~5450 and covers DESI plus VIS for
-  # every target in the configured 0<z<1.5 sample.
-  grid_name: "bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res_1200-11000A"
+  # 1200-22000 A rest-frame interval has R~5450 in the optical and covers the
+  # intrinsic DESI spectrum plus Euclid VIS/NISP Y/J/H imaging.
+  grid_name: "bc03-2016-Miles_chabrier-0.1,100_cloudy-c25.00-sps_0.055res_1200-22000A"
 
 observation:
   fov_kpc: 50.0
   pixel_scale_arcsec: 0.1
+  band_pixel_scales_arcsec:
+    VIS: 0.1
+    NISP_Y: 0.3
+    NISP_J: 0.3
+    NISP_H: 0.3
+  # Production writes only noiseless pre-PSF images. PSF, detector sampling,
+  # backgrounds, and noise are separate post-processing operations.
+  save_psf_convolved: false
   fwhm_arcsec: 0.16
 
 model:

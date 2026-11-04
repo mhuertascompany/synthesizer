@@ -27,6 +27,10 @@ GRID_DIR="${POPEYE_GRID_DIR:?Set POPEYE_GRID_DIR}"
 REFERENCE_CATALOG="${POPEYE_REFERENCE_CATALOG:?Set POPEYE_REFERENCE_CATALOG}"
 OUTPUT_ROOT="${POPEYE_OUTPUT_ROOT:?Set POPEYE_OUTPUT_ROOT}"
 
+# Keep the worker self-contained when it is submitted directly as well as via
+# popeye_submit_matched.sh.
+export PYTHONPATH="${SCRIPT_DIR}/../src:${POPEYE_ILLUSTRIS_PYTHON_ROOT:-${HOME}/python/illustris_python}:${PYTHONPATH:-}"
+
 export OMP_NUM_THREADS=16
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
